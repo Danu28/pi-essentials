@@ -104,7 +104,9 @@ export function registerTools(pi) {
     pi.registerTool({
         name: "intent",
         label: "intent",
-        description: "Deliberate + set working memory in ONE call. Goal + 2 hypotheses + files + acceptance. Picks winner, sets focus that survives compaction.",
+        description: "Deliberate + set working memory in ONE call. Goal + 2 hypotheses + files + acceptance. Picks winner, sets focus that survives compaction. REQUIRED before any write/edit/bash.",
+        promptSnippet: "intent — deliberate + focus (required before write/edit/bash)",
+        promptGuidelines: ["ALWAYS call intent with 2 hypotheses before plan/write", "Sets focus that survives compaction and links relevant memos"],
         parameters: Type.Object({
             goal: Type.String({ minLength: 1 }),
             hypotheses: Type.Array(Type.String({ minLength: 1 }), { minItems: 2, maxItems: 2 }),
@@ -142,7 +144,7 @@ export function registerTools(pi) {
             }
             catch { }
             return {
-                content: [{ type: "text", text: `intent ${id}: ${p.goal}\nA: ${p.hypotheses[0]}\nB: ${p.hypotheses[1]}\n=> Winner: ${winner}` + (links.length ? ` links:[${links.join(",")}]` : "") + `\nFocus: ${fl}` }],
+                content: [{ type: "text", text: `intent ${id}: ${p.goal}\nA: ${p.hypotheses[0]}\nB: ${p.hypotheses[1]}\n=> Winner: ${winner}` + (links.length ? ` links:[${links.join(",")}]` : "") + `\nFocus: ${fl}\n→ Next: plan{goal:"${p.goal}", tasks:["task 1 | refs:src/...","task 2 | refs:src/... check:${"npm test"}","task 3 | refs:src/... depends:0"]} (3-10 tasks) → intel → edits → check` }],
                 details: { deliberation: entry, focusLine: fl },
             };
         },
@@ -150,7 +152,9 @@ export function registerTools(pi) {
     pi.registerTool({
         name: "plan",
         label: "plan",
-        description: "Create/update verifiable plan: goal + 3-10 tasks. Each task: title | refs:src/a.ts check:bash: npm test depends:0,1. DAG blocked until earlier done.",
+        description: "Create/update verifiable plan: goal + 3-10 tasks. Each task: title | refs:src/a.ts check:bash: npm test depends:0,1. DAG blocked until earlier done. REQUIRED before any write/edit/bash.",
+        promptSnippet: "plan — DAG 3-10 tasks (required before write)",
+        promptGuidelines: ["NEVER write/edit/bash without intent→plan", "Each task: title | refs:src/a.ts check:cmd depends:0,1"],
         parameters: Type.Object({
             goal: Type.Optional(Type.String()),
             tasks: Type.Optional(Type.Array(Type.String())),
@@ -211,8 +215,9 @@ export function registerTools(pi) {
                 }
                 catch { }
                 globalThis.__pi_ess_plan = pl;
+                const allDone = pl.tasks.every((t) => t.done);
                 return {
-                    content: [{ type: "text", text: `${pl.goal}\n` + pl.tasks.map((t, i) => `${t.done ? "[x]" : "[ ]"} ${i + 1}. ${t.title}` + (t.check ? ` | check:${t.check}` : "") + (t.refs?.length ? ` | refs:${t.refs.join(",")}` : "") + (t.depends?.length ? ` | depends:${t.depends.join(",")}` : "")).join("\n") + `\n(id: ${pl.id})` }],
+                    content: [{ type: "text", text: `${pl.goal}\n` + pl.tasks.map((t, i) => `${t.done ? "[x]" : "[ ]"} ${i + 1}. ${t.title}` + (t.check ? ` | check:${t.check}` : "") + (t.refs?.length ? ` | refs:${t.refs.join(",")}` : "") + (t.depends?.length ? ` | depends:${t.depends.join(",")}` : "")).join("\n") + `\n(id: ${pl.id})` + (allDone ? "\n→ All tasks done → memo remember + commit" : "\n→ Next: intel (once) → reads/edits → check → plan {id:\"" + pl.id + "\", done:[...]}") }],
                     details: { plan: pl },
                 };
             }
@@ -257,7 +262,7 @@ export function registerTools(pi) {
             }
             catch { }
             return {
-                content: [{ type: "text", text: `${pl.goal}\n` + tasks.map((t, i) => `[ ] ${i + 1}. ${t.title}` + (t.check ? ` | check:${t.check}` : "") + (t.refs?.length ? ` | refs:${t.refs.join(",")}` : "")).join("\n") + `\n(id: ${id})` }],
+                content: [{ type: "text", text: `${pl.goal}\n` + tasks.map((t, i) => `[ ] ${i + 1}. ${t.title}` + (t.check ? ` | check:${t.check}` : "") + (t.refs?.length ? ` | refs:${t.refs.join(",")}` : "")).join("\n") + `\n(id: ${id})\n→ Next: intel → reads/edits → check → plan {id:"${id}", done:[...]}` }],
                 details: { plan: pl },
             };
         },
@@ -266,6 +271,8 @@ export function registerTools(pi) {
         name: "memo",
         label: "memo",
         description: "Unified durable memory. action=remember to encode or action=recall to retrieve. One tool instead of two.",
+        promptSnippet: "memo — remember/recall durable memory",
+        promptGuidelines: ["Use memo recall before intent to load relevant context", "Use memo remember after plan done"],
         parameters: Type.Object({
             action: Type.Union([Type.Literal("remember"), Type.Literal("recall")]),
             cue: Type.Optional(Type.String()),
@@ -296,7 +303,7 @@ export function registerTools(pi) {
                         await pi.appendEntry?.("pi-ess:memo", exists);
                     }
                     catch { }
-                    return { content: [{ type: "text", text: `Updated ${exists.id} (merged)` }], details: { id: exists.id, episode: exists } };
+                    return { content: [{ type: "text", text: `Updated ${exists.id} (merged)\n→ Next: intent/plan can now link this memo` }], details: { id: exists.id, episode: exists } };
                 }
                 const id = `${slugify(p.cue)}:${Date.now()}:${Math.random().toString(36).slice(2, 4)}`;
                 const ep = {
@@ -314,7 +321,7 @@ export function registerTools(pi) {
                     await pi.appendEntry?.("pi-ess:memo", ep);
                 }
                 catch { }
-                return { content: [{ type: "text", text: `Encoded ${id}` + (evicted.length ? ` (evicted ${evicted.length} LRU)` : "") }], details: { id, episode: ep, evicted } };
+                return { content: [{ type: "text", text: `Encoded ${id}` + (evicted.length ? ` (evicted ${evicted.length} LRU)` : "") + "\n→ Next: intent will auto-link relevant memos" }], details: { id, episode: ep, evicted } };
             }
             else {
                 const q = p.query ?? p.cue ?? "";
@@ -328,7 +335,7 @@ export function registerTools(pi) {
                 if (!scored.length) {
                     return { content: [{ type: "text", text: cand.length ? `No relevant memos for "${q}"` : "No memos yet. Use memo {action:remember} first." }], details: { episodes: [] } };
                 }
-                const text = scored.map(({ e, s }) => `[${e.cue}] (${s.toFixed(1)}) ${e.summary}` + (e.tags?.length ? ` [${e.tags.join(",")}]` : "") + (e.refs?.length ? ` refs:${e.refs.join(",")}` : "")).join("\n");
+                const text = scored.map(({ e, s }) => `[${e.cue}] (${s.toFixed(1)}) ${e.summary}` + (e.tags?.length ? ` [${e.tags.join(",")}]` : "") + (e.refs?.length ? ` refs:${e.refs.join(",")}` : "")).join("\n") + "\n→ Next: intent will auto-link these memos via scoreEpisode";
                 return { content: [{ type: "text", text }], details: { episodes: scored.map((x) => x.e) } };
             }
         },
@@ -337,6 +344,8 @@ export function registerTools(pi) {
         name: "intel",
         label: "intel",
         description: "Project profile cached: lang, scripts, test/lint/build. Call ONCE at task start — later calls free (cache).",
+        promptSnippet: "intel — cached project profile (call once)",
+        promptGuidelines: ["Call intel once after plan to get test/lint/build cmds, then proceed to edits"],
         parameters: Type.Object({
             refresh: Type.Optional(Type.Boolean()),
             projectPath: Type.Optional(Type.String()),
@@ -353,11 +362,11 @@ export function registerTools(pi) {
                         // fall through to fresh scan
                     }
                     else {
-                        return { content: [{ type: "text", text: cached.text }], details: { profile: cached, source: "cache" } };
+                        return { content: [{ type: "text", text: cached.text + "\n→ Next: reads/edits → check (test: " + cached.testCmd + ")" }], details: { profile: cached, source: "cache" } };
                     }
                 }
                 catch {
-                    return { content: [{ type: "text", text: cached.text }], details: { profile: cached, source: "cache" } };
+                    return { content: [{ type: "text", text: cached.text + "\n→ Next: reads/edits → check (test: " + cached.testCmd + ")" }], details: { profile: cached, source: "cache" } };
                 }
             }
             const files = ["package.json", "pyproject.toml", "Cargo.toml", "go.mod", "README.md"];
@@ -420,13 +429,15 @@ export function registerTools(pi) {
                 await pi.appendEntry?.("pi-ess:intel", entry);
             }
             catch { }
-            return { content: [{ type: "text", text }], details: { profile: entry, source: "fresh" } };
+            return { content: [{ type: "text", text: text + "\n→ Next: reads/edits → check (test: " + profile.testCmd + ")" }], details: { profile: entry, source: "fresh" } };
         },
     });
     pi.registerTool({
         name: "check",
         label: "check",
-        description: "Run a check and get PASS/FAIL + budget in same call. Use testCmd from intel.",
+        description: "Run a check and get PASS/FAIL + budget in same call. Use testCmd from intel. Never claim success without PASS.",
+        promptSnippet: "check — verify PASS/FAIL + budget",
+        promptGuidelines: ["ALWAYS run check after edits; never mark plan done without PASS", "On FAIL fix and re-check; after 2 fails need debug intent"],
         parameters: Type.Object({
             command: Type.String({ minLength: 1 }),
             cwd: Type.Optional(Type.String()),
@@ -464,7 +475,7 @@ export function registerTools(pi) {
             const verdict = res.timedOut ? "TIMEOUT" : res.ok ? "PASS" : "FAIL";
             const body = res.timedOut ? `TIMEOUT after ${elapsed}s` : res.ok ? truncate((res.stdout || res.stderr).trim() || "(no output)", 500) : truncate((res.stderr || res.stdout).split("\n").slice(-40).join("\n"), 1200);
             const budgetLine = pct !== null ? `budget: ${pct}% (${tier})${tier === "CRITICAL" ? " -> compact next" : ""}` : "budget: unknown";
-            const text = `check: ${verdict} (exit ${res.code}) in ${elapsed}s -- ${cmd}\n` + body + `\n${budgetLine}` + (res.ok ? "\n-> safe to mark plan done" : "\n-> fix above, re-check");
+            const text = `check: ${verdict} (exit ${res.code}) in ${elapsed}s -- ${cmd}\n` + body + `\n${budgetLine}` + (res.ok ? "\n→ Next: plan {id,done:[...]} → memo remember" : "\n→ Next: fix error above → re-run check (hint: intel test cmd, after 2 fails → intent{goal:'debug ...'})");
             return { content: [{ type: "text", text }], details: { ok: res.ok, code: res.code, timedOut: res.timedOut, budget: { pct, tier } } };
         },
     });

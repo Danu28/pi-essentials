@@ -15,6 +15,32 @@ function getFocus() {
 }
 export default function (pi) {
     registerTools(pi);
+    pi.on("before_agent_start", async (ev) => {
+        try {
+            const opts = ev?.systemPromptOptions;
+            if (!opts)
+                return;
+            // proactive guidance — shown before first tool call, so agent never hits a blind block
+            const guidelines = Array.isArray(opts.promptGuidelines) ? [...opts.promptGuidelines] : [];
+            const hasEss = guidelines.some((g) => g.includes("pi-essentials"));
+            if (!hasEss) {
+                guidelines.push("pi-essentials: ALWAYS intent{goal, hypotheses:[A,B]} → plan{goal, tasks[3-10]} BEFORE any write/edit/bash");
+                guidelines.push("After intent call plan; after plan call intel (once); after edits call check; after PASS mark plan done + memo remember");
+                guidelines.push("If check FAIL, fix and re-check. After 2 consecutive fails writes are blocked until intent{goal:'debug ...'}");
+                opts.promptGuidelines = guidelines;
+            }
+            const sections = (opts.sections ?? {});
+            if (!sections["pi-essentials"]) {
+                sections["pi-essentials"] = `<pi-essentials>
+Happy flow: intent → plan → intel → reads/edits → check PASS → plan {done} → memo remember
+Unhappy: check FAIL → fix → re-check; 2 consecutive fails → blocked until intent{goal:'debug ...'}
+All write/edit/bash blocked until intent+plan done. Run /essentials for status. Tools: intent/plan/memo/intel/check.
+</pi-essentials>`;
+                opts.sections = sections;
+            }
+        }
+        catch { }
+    });
     pi.on("session_start", async (_ev, ctx) => {
         const entries = ctx.entries ?? ctx.store?.entries ?? [];
         const combined = Array.isArray(entries) ? entries : [];
@@ -61,10 +87,11 @@ export default function (pi) {
         }
         return undefined;
     });
-    pi.on("tool_result", async (ev) => {
-        const name = getToolName(ev);
-        const isError = Boolean(ev.isError);
-        const details = (ev.result?.details ?? {});
+    pi.on("tool_result", async (ev, _ctx) => {
+        const toolEv = ev;
+        const name = getToolName(toolEv);
+        const isError = Boolean(toolEv.isError);
+        const details = (toolEv.result?.details ?? toolEv.details ?? {});
         if (name === "intent" && !isError) {
             hasIntent = true;
             const delib = details["deliberation"];
@@ -82,6 +109,15 @@ export default function (pi) {
                 fails++;
                 if (fails >= 2)
                     needsDebug = true;
+                if (fails === 1) {
+                    const orig = Array.isArray(toolEv.content) ? toolEv.content : [];
+                    return {
+                        content: [
+                            ...orig,
+                            { type: "text", text: "⚠️ 1 consecutive FAIL — next fail will block write/edit/bash until intent{goal:'debug ...'}. Fix the error above and re-run check before writing." },
+                        ],
+                    };
+                }
             }
             else if (ok === true) {
                 fails = 0;
@@ -90,6 +126,12 @@ export default function (pi) {
                 fails++;
                 if (fails >= 2)
                     needsDebug = true;
+                if (fails === 1) {
+                    const orig = Array.isArray(toolEv.content) ? toolEv.content : [];
+                    return {
+                        content: [...orig, { type: "text", text: "⚠️ 1 error — next fail will block writes until debug intent. Inspect and fix." }],
+                    };
+                }
             }
         }
         if (name === "write" || name === "edit" || name === "bash") {
@@ -97,6 +139,12 @@ export default function (pi) {
                 fails++;
                 if (fails >= 2)
                     needsDebug = true;
+                if (fails === 1) {
+                    const orig = Array.isArray(toolEv.content) ? toolEv.content : [];
+                    return {
+                        content: [...orig, { type: "text", text: "⚠️ 1 consecutive write/edit/bash error — one more fail will require intent{goal:'debug ...'} before further writes." }],
+                    };
+                }
             }
             else {
                 fails = 0;
