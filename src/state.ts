@@ -45,12 +45,22 @@ export interface IntelProfile {
   text: string;
 }
 
+export const MAX_MEMOS = 100;
 export const memos = new Map<string, MemoEpisode>();
 export const deliberations: Deliberation[] = [];
 export const plans = new Map<string, Plan>();
 export let latestPlan: Plan | undefined;
 export let focusLine: string | null = null;
 export let intelCache: IntelProfile | null = null;
+
+/** Evict oldest memos (by ts) until size <= MAX_MEMOS. LRU-ish. */
+export function enforceMemoCap(): string[] {
+  if (memos.size <= MAX_MEMOS) return [];
+  const sorted = [...memos.values()].sort((a, b) => a.ts - b.ts);
+  const toEvict = sorted.slice(0, memos.size - MAX_MEMOS);
+  for (const e of toEvict) memos.delete(e.id);
+  return toEvict.map((e) => e.id);
+}
 
 declare global {
   var __pi_ess_focus: string | undefined;
@@ -168,6 +178,7 @@ export function hydrate(entries: unknown[]): void {
       }
     }
   }
+  enforceMemoCap();
   if (!focusLine && globalThis.__pi_ess_focus) focusLine = globalThis.__pi_ess_focus;
   if (!intelCache && globalThis.__pi_ess_intel) intelCache = globalThis.__pi_ess_intel;
   if (!latestPlan && globalThis.__pi_ess_plan) {
@@ -183,4 +194,8 @@ export function clearState(): void {
   latestPlan = undefined;
   focusLine = null;
   intelCache = null;
+  // also clear durable globals so next session starts clean
+  try { delete (globalThis as unknown as Record<string, unknown>).__pi_ess_focus; } catch {}
+  try { delete (globalThis as unknown as Record<string, unknown>).__pi_ess_intel; } catch {}
+  try { delete (globalThis as unknown as Record<string, unknown>).__pi_ess_plan; } catch {}
 }

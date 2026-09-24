@@ -1,10 +1,12 @@
 import { Type } from "typebox";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   memos,
   deliberations,
   plans,
   scoreEpisode,
   truncate,
+  enforceMemoCap,
   type MemoEpisode,
   type Plan,
   type IntelProfile,
@@ -20,7 +22,20 @@ function parseRisk(h: string): number {
   return Number.isFinite(n) ? n : 5;
 }
 
-function parseTask(raw: string): {
+export const MAX_TASKS = 10;
+
+export function validateDepends(depends: number[] | undefined, taskCount: number, selfIndex?: number): string | null {
+  if (!depends?.length) return null;
+  for (const d of depends) {
+    if (!Number.isInteger(d) || d < 0 || d >= taskCount) return `depends index ${d} out of range [0,${taskCount - 1}]`;
+    if (selfIndex !== undefined && d === selfIndex) return `task ${selfIndex + 1} cannot depend on itself`;
+    // simple cycle hint: depends must be on earlier tasks for DAG sanity (allow forward but warn)
+  }
+  if (new Set(depends).size !== depends.length) return "duplicate depends indices";
+  return null;
+}
+
+export function parseTask(raw: string): {
   title: string;
   refs?: string[];
   check?: string;
@@ -100,7 +115,7 @@ function runCmd(
   });
 }
 
-export function registerTools(pi: any): void {
+export function registerTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "intent",
     label: "intent",
@@ -130,7 +145,7 @@ export function registerTools(pi: any): void {
       deliberations.push(entry);
       if (deliberations.length > 20) deliberations.shift();
       const fl = `[pi-essentials focus] ${p.goal}` + (p.files?.length ? ` files:[${p.files.join(",")}]` : "") + (p.acceptance ? ` acceptance:${p.acceptance}` : "");
-      (globalThis as any).__pi_ess_focus = fl;
+      (globalThis as unknown as Record<string, unknown>).__pi_ess_focus = fl;
       try { await pi.appendEntry?.("pi-ess:focus", { goal: p.goal, files: p.files ?? [], acceptance: p.acceptance, ts: Date.now() }); } catch {}
       try { await pi.appendEntry?.("pi-ess:deliberation", entry); } catch {}
       return {
@@ -155,8 +170,10 @@ export function registerTools(pi: any): void {
         const pl = plans.get(p.id) as Plan;
         if (p.done?.length) {
           for (const i of p.done) {
+            if (!Number.isInteger(i) || i < 0 || i >= pl.tasks.length) {
+              return { content: [{ type: "text", text: `Invalid done index ${i} (range 0-${pl.tasks.length - 1})` }], details: { error: "range" } };
+            }
             const task = pl.tasks[i];
-            if (!task) continue;
             const blocked = task.depends?.some((d) => !pl.tasks[d]?.done);
             if (blocked) {
               return { content: [{ type: "text", text: `Blocked: Task ${i + 1} depends on [${task.depends!.map((d) => d + 1).join(",")}]` }], details: { error: "depends" } };
@@ -165,18 +182,36 @@ export function registerTools(pi: any): void {
           }
         }
         if (p.tasks?.length) {
+          if (pl.tasks.length >= MAX_TASKS) {
+            return { content: [{ type: "text", text: `plan cap: already ${MAX_TASKS} tasks (max ${MAX_TASKS})` }], details: { error: "cap" } };
+          }
           const seen = new Set(pl.tasks.map((t) => t.title.toLowerCase()));
+          const pending: ReturnType<typeof parseTask>[] = [];
           for (const raw of p.tasks) {
             const parsed = parseTask(raw);
             if (!parsed.title) continue;
             if (seen.has(parsed.title.toLowerCase())) continue;
-            pl.tasks.push({ ...parsed, done: false });
+            pending.push(parsed);
             seen.add(parsed.title.toLowerCase());
+          }
+          const totalAfter = pl.tasks.length + pending.length;
+          if (totalAfter > MAX_TASKS) {
+            return { content: [{ type: "text", text: `plan cap: adding ${pending.length} would exceed ${MAX_TASKS} (have ${pl.tasks.length})` }], details: { error: "cap" } };
+          }
+          // validate depends indices against final size
+          const finalCount = totalAfter;
+          for (let idx = 0; idx < pending.length; idx++) {
+            const selfIdx = pl.tasks.length + idx;
+            const err = validateDepends(pending[idx].depends, finalCount, selfIdx);
+            if (err) return { content: [{ type: "text", text: `Invalid depends for task ${selfIdx + 1}: ${err}` }], details: { error: "depends" } };
+          }
+          for (const parsed of pending) {
+            pl.tasks.push({ ...parsed, done: false });
           }
         }
         if (p.goal) pl.goal = truncate(p.goal, 200);
         try { await pi.appendEntry?.("pi-ess:plan", pl); } catch {}
-        (globalThis as any).__pi_ess_plan = pl;
+        (globalThis as unknown as Record<string, unknown>).__pi_ess_plan = pl;
         return {
           content: [{ type: "text", text: `${pl.goal}\n` + pl.tasks.map((t, i) => `${t.done ? "[x]" : "[ ]"} ${i + 1}. ${t.title}` + (t.check ? ` | check:${t.check}` : "") + (t.refs?.length ? ` | refs:${t.refs.join(",")}` : "") + (t.depends?.length ? ` | depends:${t.depends.join(",")}` : "")).join("\n") + `\n(id: ${pl.id})` }],
           details: { plan: pl },
@@ -185,17 +220,37 @@ export function registerTools(pi: any): void {
       if (!p.goal || !p.tasks?.length) {
         return { content: [{ type: "text", text: "plan: need goal + tasks[3-10] on create, or id+done to update" }], details: { error: "missing" } };
       }
-      if (p.tasks.length < 3 || p.tasks.length > 10) {
-        return { content: [{ type: "text", text: `plan: need 3-10 tasks, got ${p.tasks.length}` }], details: { error: "count" } };
+      if (p.tasks.length < 3 || p.tasks.length > MAX_TASKS) {
+        return { content: [{ type: "text", text: `plan: need 3-${MAX_TASKS} tasks, got ${p.tasks.length}` }], details: { error: "count" } };
       }
-      const tasks = p.tasks.map((raw) => {
-        const parsed = parseTask(raw);
-        return { ...parsed, done: false };
-      });
+      const parsedAll = p.tasks.map((raw) => parseTask(raw)).filter((t) => t.title);
+      if (parsedAll.length < 3) {
+        return { content: [{ type: "text", text: `plan: need 3-${MAX_TASKS} non-empty tasks, got ${parsedAll.length} after filtering` }], details: { error: "count" } };
+      }
+      if (parsedAll.length > MAX_TASKS) {
+        return { content: [{ type: "text", text: `plan: need 3-${MAX_TASKS} tasks, got ${parsedAll.length} after filtering` }], details: { error: "count" } };
+      }
+      // validate depends against final count + dedup titles already filtered
+      const deduped: typeof parsedAll = [];
+      const seenCreate = new Set<string>();
+      for (const t of parsedAll) {
+        const k = t.title.toLowerCase();
+        if (seenCreate.has(k)) continue;
+        seenCreate.add(k);
+        deduped.push(t);
+      }
+      if (deduped.length < 3) {
+        return { content: [{ type: "text", text: `plan: need 3-${MAX_TASKS} unique tasks, got ${deduped.length} after dedup` }], details: { error: "count" } };
+      }
+      for (let i = 0; i < deduped.length; i++) {
+        const err = validateDepends(deduped[i].depends, deduped.length, i);
+        if (err) return { content: [{ type: "text", text: `Invalid depends for task ${i + 1}: ${err}` }], details: { error: "depends" } };
+      }
+      const tasks = deduped.map((parsed) => ({ ...parsed, done: false }));
       const id = `plan:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`;
       const pl: Plan = { id, goal: truncate(p.goal, 200), tasks, ts: Date.now() };
       plans.set(id, pl);
-      (globalThis as any).__pi_ess_plan = pl;
+      (globalThis as unknown as Record<string, unknown>).__pi_ess_plan = pl;
       try { await pi.appendEntry?.("pi-ess:plan", pl); } catch {}
       return {
         content: [{ type: "text", text: `${pl.goal}\n` + tasks.map((t, i) => `[ ] ${i + 1}. ${t.title}` + (t.check ? ` | check:${t.check}` : "") + (t.refs?.length ? ` | refs:${t.refs.join(",")}` : "")).join("\n") + `\n(id: ${id})` }],
@@ -245,8 +300,9 @@ export function registerTools(pi: any): void {
           ts: Date.now(),
         };
         memos.set(id, ep);
+        const evicted = enforceMemoCap();
         try { await pi.appendEntry?.("pi-ess:memo", ep); } catch {}
-        return { content: [{ type: "text", text: `Encoded ${id}` }], details: { id, episode: ep } };
+        return { content: [{ type: "text", text: `Encoded ${id}` + (evicted.length ? ` (evicted ${evicted.length} LRU)` : "") }], details: { id, episode: ep, evicted } };
       } else {
         const q = p.query ?? p.cue ?? "";
         const lim = Math.min(Math.max(p.limit ?? 5, 1), 20);
@@ -276,9 +332,19 @@ export function registerTools(pi: any): void {
     async execute(_id: string, p: { refresh?: boolean; projectPath?: string }, _sig: unknown, _upd: unknown, ctx: { cwd: string }) {
       const rawCwd = p.projectPath ?? ctx.cwd;
       const cwd = resolve(rawCwd);
-      const cached = (globalThis as any).__pi_ess_intel as IntelProfile | undefined;
+      const cached = (globalThis as unknown as Record<string, unknown>).__pi_ess_intel as IntelProfile | undefined;
       if (cached && resolve(cached.cwd) === cwd && !p.refresh) {
-        return { content: [{ type: "text", text: cached.text }], details: { profile: cached, source: "cache" } };
+        // auto-invalidate if package.json changed since cache (fixes stale intel)
+        try {
+          const pkgStat = await stat(join(cwd, "package.json"));
+          if (pkgStat.mtimeMs > cached.scannedAt) {
+            // fall through to fresh scan
+          } else {
+            return { content: [{ type: "text", text: cached.text }], details: { profile: cached, source: "cache" } };
+          }
+        } catch {
+          return { content: [{ type: "text", text: cached.text }], details: { profile: cached, source: "cache" } };
+        }
       }
       const files = ["package.json", "pyproject.toml", "Cargo.toml", "go.mod", "README.md"];
       const present = new Set<string>();
@@ -327,7 +393,7 @@ export function registerTools(pi: any): void {
       const displayName = name ?? basename(cwd);
       const text = `project: ${displayName} (${lang})\n` + `test: ${profile.testCmd} | lint: ${profile.lintCmd} | build: ${profile.buildCmd}\n` + `scripts: ${Object.entries(scripts).slice(0, 6).map(([k, v]) => `${k}->${v}`).join(" | ") || "none"}`;
       const entry: IntelProfile = { ...profile, text };
-      (globalThis as any).__pi_ess_intel = entry;
+      (globalThis as unknown as Record<string, unknown>).__pi_ess_intel = entry;
       try { await pi.appendEntry?.("pi-ess:intel", entry); } catch {}
       return { content: [{ type: "text", text }], details: { profile: entry, source: "fresh" } };
     },
