@@ -55,15 +55,15 @@ export default function (pi: ExtensionAPI) {
         if (!goal || isDebugGoal(goal)) return undefined;
         return {
           block: true,
-          message:
-            "Blocked: 2 consecutive fails -> need intent{goal:'debug ...'} (got non-debug intent) before write/edit/bash",
+          reason:
+            "Blocked: 2 consecutive fails → need intent{goal:'debug ...'} (got non-debug intent) before write/edit/bash. Run: intent{goal:'debug <what failed>', hypotheses:['fix A | risk:2','fix B | risk:5']}",
         } as unknown;
       }
       if (isMutating) {
         return {
           block: true,
-          message:
-            "Blocked: 2 consecutive fails -> need intent{goal:'debug ...'} before write/edit/bash",
+          reason:
+            "Blocked: 2 consecutive fails → need intent{goal:'debug ...'} before write/edit/bash. Run: intent{goal:'debug <what failed>', hypotheses:['fix A | risk:2','fix B | risk:5']}",
         } as unknown;
       }
     }
@@ -71,7 +71,8 @@ export default function (pi: ExtensionAPI) {
     if (isMutating && (!hasIntent || !hasPlan)) {
       return {
         block: true,
-        message: "Blocked: need intent -> plan before write/edit/bash (happy flow)",
+        reason:
+          "Blocked: need intent → plan before write/edit/bash. Happy flow: 1) intent{goal:'...', hypotheses:['A | risk:2','B | risk:5'], files:['...'], acceptance:'...'} 2) plan{goal:'...', tasks:['t1 | refs:src/a.ts','t2 | refs:src/a.ts check:npm test','t3 | refs:src/a.ts']} 3) then write/edit/bash. Check /essentials for status.",
       } as unknown;
     }
     return undefined;
