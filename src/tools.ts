@@ -92,9 +92,19 @@ export function registerTools(pi: ExtensionAPI): void {
       if (p.id && plans.has(p.id)) {
         const pl = plans.get(p.id) as Plan;
         if (p.done?.length) {
-          for (const i of p.done) {
+          // display is 1-indexed ("1. task"), API is 0-indexed — tolerate classic off-by-one
+          let doneIndices = p.done;
+          // only auto-correct when caller clearly used 1-indexed (contains tasks.length, no 0)
+          const hasOutOfRangeOneIndexed =
+            doneIndices.some((n) => n === pl.tasks.length) &&
+            doneIndices.every((n) => Number.isInteger(n) && n >= 1 && n <= pl.tasks.length);
+          if (hasOutOfRangeOneIndexed) {
+            doneIndices = doneIndices.map((n) => n - 1);
+          }
+          for (const i of doneIndices) {
             if (!Number.isInteger(i) || i < 0 || i >= pl.tasks.length) {
-              return { content: [{ type: "text", text: `Invalid done index ${i} (range 0-${pl.tasks.length - 1})` }], details: { error: "range" } };
+              const hint = Number.isInteger(i) && i === pl.tasks.length ? ` — did you mean ${i - 1}? (tasks are 0-indexed; display is 1-indexed)` : "";
+              return { content: [{ type: "text", text: `Invalid done index ${i} (range 0-${pl.tasks.length - 1})${hint}` }], details: { error: "range" } };
             }
             const task = pl.tasks[i];
             const blocked = task.depends?.some((d) => !pl.tasks[d]?.done);
