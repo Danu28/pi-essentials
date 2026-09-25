@@ -230,4 +230,85 @@ describe("registerTools - intel & check", () => {
     const r = await check.execute("id", { command: "   " }, null, null, { cwd: process.cwd() });
     expect(r.content[0].text).toMatch(/command required/);
   });
+
+  it("check budget tiers moderate/getting-full/CRITICAL", async () => {
+    const { pi, tools } = makeMockPi();
+    registerTools(pi);
+    const check = tools.get("check");
+    const mod = await check.execute("id", { command: "node -e \"process.exit(0)\"" }, null, null, { cwd: process.cwd(), getContextUsage: () => ({ percent: 60 }) });
+    expect(mod.content[0].text).toContain("moderate");
+    const full = await check.execute("id", { command: "node -e \"process.exit(0)\"" }, null, null, { cwd: process.cwd(), getContextUsage: () => ({ tokens: 900, contextWindow: 1000 }) });
+    expect(full.content[0].text).toContain("CRITICAL");
+  });
+
+  it("check handles missing context", async () => {
+    const { pi, tools } = makeMockPi();
+    registerTools(pi);
+    const check = tools.get("check");
+    const r = await check.execute("id", { command: "node -e \"process.exit(0)\"" }, null, null, { cwd: process.cwd() });
+    expect(r.content[0].text).toContain("budget: unknown");
+  });
+});
+
+describe("registerTools - extra branches", () => {
+  beforeEach(() => clearState());
+  it("intent defaults risk 5 and truncates", async () => {
+    const { pi, tools } = makeMockPi();
+    registerTools(pi);
+    const intent = tools.get("intent");
+    const longGoal = "g".repeat(500);
+    const r = await intent.execute("id", { goal: longGoal, hypotheses: ["no risk here", "also none"] }, null, null, { cwd: process.cwd() });
+    expect(r.details.deliberation.goal.length).toBeLessThanOrEqual(201); // 200 + ellipsis
+    expect(r.details.deliberation.winner).toBe("no risk here"); // both risk 5, picks first
+  });
+  it("plan handles cap and invalid done index", async () => {
+    const { pi, tools } = makeMockPi();
+    registerTools(pi);
+    const plan = tools.get("plan");
+    const res = await plan.execute("id", { goal: "cap test", tasks: ["t1 | refs:src/a.ts", "t2 | refs:src/b.ts", "t3 | refs:src/c.ts"] }, null, null, { cwd: process.cwd() });
+    const pid = res.details.plan.id;
+    // invalid done index
+    const err = await plan.execute("id", { id: pid, done: [99] }, null, null, { cwd: process.cwd() });
+    expect(err.content[0].text).toMatch(/Invalid done/);
+    // add tasks up to cap
+    const many = Array.from({ length: 7 }, (_, i) => `extra ${i} | refs:src/${i}.ts`);
+    const r2 = await plan.execute("id", { id: pid, tasks: many }, null, null, { cwd: process.cwd() });
+    expect(r2.details.plan.tasks.length).toBe(10);
+    const over = await plan.execute("id", { id: pid, tasks: ["one more | refs:src/x.ts"] }, null, null, { cwd: process.cwd() });
+    expect(over.content[0].text).toMatch(/cap: already/);
+  });
+  it("plan rejects adding tasks that exceed cap", async () => {
+    const { pi, tools } = makeMockPi();
+    registerTools(pi);
+    const plan = tools.get("plan");
+    const res = await plan.execute("id", { goal: "cap2", tasks: ["a | refs:src/a.ts", "b | refs:src/b.ts", "c | refs:src/c.ts", "d | refs:src/d.ts", "e | refs:src/e.ts", "f | refs:src/f.ts", "g | refs:src/g.ts", "h | refs:src/h.ts", "i | refs:src/i.ts"] }, null, null, { cwd: process.cwd() });
+    const pid = res.details.plan.id;
+    const r = await plan.execute("id", { id: pid, tasks: ["j | refs:src/j.ts", "k | refs:src/k.ts"] }, null, null, { cwd: process.cwd() });
+    expect(r.content[0].text).toMatch(/would exceed/);
+  });
+  it("memo recall with empty store", async () => {
+    const { pi, tools } = makeMockPi();
+    registerTools(pi);
+    const memo = tools.get("memo");
+    const r = await memo.execute("id", { action: "recall", query: "nothing" }, null, null, { cwd: process.cwd() });
+    expect(r.content[0].text).toMatch(/No memos yet/);
+  });
+  it("memo recall no relevant for query", async () => {
+    const { pi, tools } = makeMockPi();
+    registerTools(pi);
+    const memo = tools.get("memo");
+    await memo.execute("id", { action: "remember", cue: "hello", summary: "world" }, null, null, { cwd: process.cwd() });
+    const r = await memo.execute("id", { action: "recall", query: "xyz123nomatch" }, null, null, { cwd: process.cwd() });
+    expect(r.content[0].text).toMatch(/No relevant/);
+  });
+  it("intel stale cache falls through", async () => {
+    const { pi, tools } = makeMockPi();
+    registerTools(pi);
+    const intel = tools.get("intel");
+    // seed cache with old timestamp
+    (globalThis as any).__pi_ess_intel = { cwd: process.cwd(), lang: "node", scripts: {}, testCmd: "old", lintCmd: "old", buildCmd: "old", scannedAt: 0, text: "old text" };
+    const r = await intel.execute("id", {}, null, null, { cwd: process.cwd() });
+    expect(r.details.source).toBe("fresh");
+    expect(r.content[0].text).not.toContain("old text");
+  });
 });

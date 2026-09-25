@@ -181,3 +181,61 @@ describe("clearState", () => {
     expect((globalThis as any).__pi_ess_plan).toBeUndefined();
   });
 });
+
+describe("scoreEpisode edge cases", () => {
+  it("hits s===0 branch with tag match but no query match", () => {
+    const e: any = { cue: "other", summary: "other", tags: ["auth"] };
+    // query xyz matches nothing, but tag auth matches
+    const s = scoreEpisode(e, "xyz", ["auth"]);
+    expect(s).toBe(0.5); // matches * 0.5 when s was 0
+  });
+  it("hits s !==0 tag boost branch", () => {
+    const e: any = { cue: "auth hello", summary: "auth", tags: ["auth"] };
+    const s = scoreEpisode(e, "auth", ["auth"]);
+    // s>0 and tag matches -> boost
+    expect(s).toBeGreaterThan(2);
+  });
+});
+
+describe("hydrate extra branches", () => {
+  beforeEach(() => clearState());
+  it("handles extractKeyValue non-record and nested key/value", () => {
+    // non-record entry
+    hydrate(["plain string" as any]);
+    expect(memos.size).toBe(0);
+    // nested key/value wrapping
+    hydrate([{ key: "outer", value: { key: "pi-ess:memo", value: { id: "nested1", cue: "c", summary: "s", ts: Date.now() } } } as any]);
+    expect(memos.has("nested1")).toBe(true);
+    clearState();
+    // key via type/kind/name fallback
+    hydrate([{ type: "pi-ess:memo", data: { id: "viaType", cue: "c", summary: "s", ts: Date.now() } } as any]);
+    expect(memos.has("viaType")).toBe(true);
+  });
+  it("hydrates legacy deliberation shape", () => {
+    hydrate([{ goal: "legacy goal", hypotheses: ["a", "b"], id: "legD1", ts: Date.now() } as any]);
+    expect(deliberations.some((d) => d.goal === "legacy goal")).toBe(true);
+  });
+  it(" caps deliberations at 20", () => {
+    const entries: any[] = [];
+    for (let i = 0; i < 22; i++) entries.push({ key: "pi-ess:deliberation", value: { id: `d${i}`, goal: `g${i}`, hypotheses: ["a", "b"], ts: 1000 + i } });
+    hydrate(entries);
+    expect(deliberations.length).toBe(20);
+    expect(deliberations[0].id).toBe("d2"); // oldest 2 evicted
+  });
+  it("falls back to globalThis when focusLine null", async () => {
+    (globalThis as any).__pi_ess_focus = "[pi-essentials focus] fallback goal";
+    (globalThis as any).__pi_ess_intel = { cwd: "/tmp", lang: "node", scripts: {}, testCmd: "t", lintCmd: "l", buildCmd: "b", scannedAt: Date.now(), text: "txt" };
+    (globalThis as any).__pi_ess_plan = { id: "fallbackPlan", goal: "g", tasks: [], ts: Date.now() };
+    hydrate([]);
+    // hydrate clears then falls back to globalThis values
+    const { focusLine: fl, intelCache, latestPlan } = await import("./state.js");
+    expect(fl).toContain("fallback goal");
+    expect(intelCache).toBeDefined();
+    expect(latestPlan?.id).toBe("fallbackPlan");
+    clearState();
+  });
+  it("ignores memo without id", () => {
+    hydrate([{ cue: "no id", summary: "s", ts: Date.now() } as any]);
+    expect(memos.size).toBe(0);
+  });
+});

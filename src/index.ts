@@ -191,8 +191,8 @@ All write/edit/bash blocked until intent+plan done. Run /essentials for status. 
       const last = [...msgs].reverse().find((m) => m.role === "user");
       if (last) {
         const note = `\n\n[pi-essentials] budget CRITICAL ${pct}% -> finish edit, run check, compact next turn.`;
+        const idx = msgs.indexOf(last);
         const newMsgs = msgs.map((m) => ({ ...m }));
-        const idx = newMsgs.indexOf(last);
         const clonedLast: Record<string, unknown> = { ...last } as Record<string, unknown>;
         if (typeof clonedLast["content"] === "string") clonedLast["content"] += note;
         else if (Array.isArray(clonedLast["content"]))

@@ -6,7 +6,7 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "json", "html"],
-      include: ["src/state.ts", "src/tools.ts"],
+      include: ["src/state.ts", "src/tools.ts", "src/tool-helpers.ts", "src/index.ts"],
       exclude: ["src/**/*.test.ts", "src/pi-shim.d.ts"],
       thresholds: {
         lines: 45,
