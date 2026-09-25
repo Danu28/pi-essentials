@@ -1,6 +1,6 @@
 {
   "name": "pi-essentials",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "pi core + 1 extension: 5 high-signal tools (intent/plan/memo/intel/check) that make pi Faster, Cheaper, Reliable, Durable. Replaces pi-brain + smart-pi (11 tools -> 5).",
   "type": "module",
   "main": "./dist/index.js",
@@ -29,7 +29,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "test:ci": "npm run typecheck && npm run lint && npm run test:coverage",
     "lint": "eslint src",
+    "size": "npm run build && du -sh dist && ls -lh dist",
     "prepublishOnly": "npm run build"
   },
   "peerDependencies": {
