@@ -2,6 +2,7 @@ export declare const MAX_TASKS = 10;
 export declare const MAX_OUTPUT: number;
 export declare const INTENT_VERBS: string[];
 export declare const VAGUE_HYPOTHESIS_PATTERNS: string[];
+export declare const HEAVY_CHECK_PATTERNS: RegExp[];
 export declare function lintIntent(p: {
     goal: string;
     hypotheses: [string, string];

@@ -164,7 +164,8 @@ memo({ action:"recall", query:"auth jwt", tags:["auth"], limit:5 })
 
 1. `intent` with verb-led goal ≥10ch, 2 hypotheses with `| risk:N`, `files[]`, `acceptance`
 2. `plan` with 3-10 tasks, each `| refs:` and at least one `| check:`
-3. `intel` once for correct `testCmd`
-4. No lint/truncation warnings in `intent`/`plan` response — if you see `⚠️ input lint` or `✂️ truncated`, fix input before editing.
+3. `intel` once for correct `testCmd` + OS (Windows `cmd.exe` vs `bash` — `ls`/`cat` fails on `cmd`)
+4. Prefer `read` over `bash` for file checks; if `bash`/`check`, always `timeout:10` (file stat) or `timeout:30-60` (tests), quote paths with spaces — see `docs/checks.md`
+5. No lint/truncation warnings in `intent`/`plan` response — if you see `⚠️ input lint` or `✂️ truncated` or `heavy check`, fix input before editing.
 
 See `README.md` happy flow and `src/tool-helpers.ts:lintIntent/lintPlan` for exact rules.

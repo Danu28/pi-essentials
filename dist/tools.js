@@ -380,7 +380,7 @@ export function registerTools(pi) {
             if (!cmd)
                 return { content: [{ type: "text", text: "check: command required" }], details: { error: "empty" } };
             const cwd = p.cwd ?? ctx.cwd;
-            const toMs = Math.min(p.timeout ?? 120, 600) * 1000;
+            const toMs = Math.min(p.timeout ?? 30, 600) * 1000;
             const start = Date.now();
             const res = await runCmd(cmd, cwd, toMs);
             const elapsed = Math.round((Date.now() - start) / 1000);

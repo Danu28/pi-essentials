@@ -4,6 +4,7 @@ export const MAX_TASKS = 10;
 export const MAX_OUTPUT = 64 * 1024;
 export const INTENT_VERBS = ["add", "fix", "implement", "create", "update", "refactor", "remove", "delete", "migrate", "audit", "test", "build", "wire", "ship", "design", "expand", "enforce", "handle", "support", "render", "parse", "validate", "introduce", "improve", "optimize", "document"];
 export const VAGUE_HYPOTHESIS_PATTERNS = ["fix bug", "maybe", "do thing", "quick fix", "improve stuff", "handle thing", "stuff", "thing", "some bug", "general"];
+export const HEAVY_CHECK_PATTERNS = [/findstr\s+\/R/i, /find\s+\/c/i, /\|\s*find\b/i, /ls\s+-R/i, /find\s+\./i];
 export function lintIntent(p) {
     const warns = [];
     const goal = p.goal ?? "";
@@ -40,6 +41,11 @@ export function lintPlan(tasks) {
             warns.push(`task ${i + 1} "${t.title}" missing refs — add | refs:src/a.ts`);
         if (!t.check)
             warns.push(`task ${i + 1} "${t.title}" missing check — add | check:npm test (or per-task lint)`);
+        if (t.check && HEAVY_CHECK_PATTERNS.some((re) => re.test(t.check)))
+            warns.push(`task ${i + 1} "${t.title}" heavy check "${t.check}" — prefer lightweight dir/ls or read; avoid findstr /R, find /c, ls -R (2m hangs). Use lightweight check + timeout:10`);
+        if (t.check && /\b(ls|cat|grep)\b/.test(t.check) && /"[^"]*\s[^"]*"/.test(t.check) === false && t.check.includes(" ")) {
+            // hint about quoting paths with spaces, non-blocking
+        }
     });
     return warns;
 }
