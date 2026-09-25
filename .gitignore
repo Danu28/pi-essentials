@@ -6,3 +6,6 @@ node_modules/
 coverage/
 .tmp/
 .pi/
+# dist is intentionally committed for pi extension publishing (see package.json files)
+# uncomment to ignore build artifacts in forks:
+# dist/
