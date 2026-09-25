@@ -153,4 +153,62 @@ describe("pi-essentials extension", () => {
     const res = await handlers["tool_call"]({ toolName: "write" });
     expect(res).toBeUndefined(); // not blocked
   });
+
+  it("context handles array content and missing user", async () => {
+    const { pi, handlers } = makePi();
+    createExtension(pi);
+    const h = handlers["context"];
+    const ctx: any = { getContextUsage: () => ({ percent: 95 }) };
+    // array content branch
+    const evArr: any = { messages: [{ role: "user", content: [{ type: "text", text: "hello" }] }] };
+    const resArr = await h(evArr, ctx);
+    expect(resArr?.messages[0].content).toEqual(expect.arrayContaining([{ type: "text", text: "hello" }]));
+    // non-string non-array fallback (object content)
+    const evObj: any = { messages: [{ role: "user", content: { custom: "obj" } }] };
+    const resObj = await h(evObj, ctx);
+    expect(String(resObj?.messages[0].content)).toContain("CRITICAL 95%");
+    // no user message -> no patch
+    const evNoUser: any = { messages: [{ role: "assistant", content: "hi" }] };
+    const resNoUser = await h(evNoUser, ctx);
+    expect(resNoUser).toBeUndefined();
+    // empty messages
+    const resEmpty = await h({ messages: [] }, ctx);
+    expect(resEmpty).toBeUndefined();
+    // getContextUsage throws
+    const ctxThrow: any = { getContextUsage: () => { throw new Error("boom"); } };
+    const resThrow = await h({ messages: [{ role: "user", content: "hi" }] }, ctxThrow);
+    expect(resThrow).toBeUndefined();
+    // tokens/contextWindow branch
+    const ctxTokens: any = { getContextUsage: () => ({ tokens: 950, contextWindow: 1000 }) };
+    const resTokens = await h({ messages: [{ role: "user", content: "hello" }] }, ctxTokens);
+    expect(resTokens?.messages[0].content).toContain("CRITICAL 95%");
+  });
+
+  it("session_before_compact handles no focus and empty summary", async () => {
+    const { pi, handlers } = makePi();
+    createExtension(pi);
+    (globalThis as any).__pi_ess_focus = undefined;
+    // clearState ensures focusLine null, so getFocus() -> null -> undefined
+    const { clearState: cs } = await import("./state.js");
+    cs();
+    const h = handlers["session_before_compact"];
+    const resNoFocus = await h({ summary: "hello" });
+    expect(resNoFocus).toBeUndefined();
+    // with focus but summary undefined
+    (globalThis as any).__pi_ess_focus = "[pi-essentials focus] g";
+    const resUndef = await h({} as any);
+    expect(resUndef?.summary).toContain("[pi-essentials focus]");
+  });
+
+  it("before_agent_start handles missing opts", async () => {
+    const { pi, handlers } = makePi();
+    createExtension(pi);
+    const h = handlers["before_agent_start"];
+    await expect(h({})).resolves.toBeUndefined();
+    await expect(h({ systemPromptOptions: null })).resolves.toBeUndefined();
+    // already has pi-essentials -> no dup
+    const opts: any = { promptGuidelines: ["pi-essentials: existing"], sections: { "pi-essentials": "existing" } };
+    await h({ systemPromptOptions: opts });
+    expect(opts.promptGuidelines.filter((g: string) => g.includes("pi-essentials")).length).toBe(1);
+  });
 });

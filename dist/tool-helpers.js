@@ -3,7 +3,8 @@ import { spawn } from "node:child_process";
 export const MAX_TASKS = 10;
 export const MAX_OUTPUT = 64 * 1024;
 export const INTENT_VERBS = ["add", "fix", "implement", "create", "update", "refactor", "remove", "delete", "migrate", "audit", "test", "build", "wire", "ship", "design", "expand", "enforce", "handle", "support", "render", "parse", "validate", "introduce", "improve", "optimize", "document"];
-export const VAGUE_HYPOTHESIS_PATTERNS = ["fix bug", "maybe", "do thing", "quick fix", "improve stuff", "handle thing", "stuff", "thing", "some bug", "general"];
+export const VAGUE_HYPOTHESIS_PATTERNS = ["fix bug", "maybe", "do thing", "quick fix", "improve stuff", "handle thing", "some bug", "general"];
+const VAGUE_WORD_RE = /\bstuff\b|\bthing\b/i;
 export const HEAVY_CHECK_PATTERNS = [/findstr\s+\/R/i, /find\s+\/c/i, /\|\s*find\b/i, /ls\s+-R/i, /find\s+\./i];
 export function lintIntent(p) {
     const warns = [];
@@ -23,7 +24,7 @@ export function lintIntent(p) {
         if (title.length < 10)
             warns.push(`hypothesis ${i + 1} vague (<10 chars title): "${title}" — e.g. "jwt via jose, 15m expiry | risk:2"`);
         const lower = title.toLowerCase();
-        if (VAGUE_HYPOTHESIS_PATTERNS.some((pat) => lower.includes(pat)))
+        if (VAGUE_HYPOTHESIS_PATTERNS.some((pat) => lower.includes(pat)) || VAGUE_WORD_RE.test(title))
             warns.push(`hypothesis ${i + 1} generic ("${title}") — include mechanism + risk: e.g. "session store redis | risk:5"`);
         if (!/risk\s*:/i.test(raw))
             warns.push(`hypothesis ${i + 1} missing risk — add " | risk:2" (lower = safer)`);

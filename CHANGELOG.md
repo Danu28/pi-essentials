@@ -2,6 +2,16 @@
 
 All notable changes to `pi-essentials` will be documented here. Follows [SemVer](https://semver.org/).
 
+## [1.3.1] - 2026-09-25
+
+### Fixed
+- Audit fixes (6): coverage thresholds `45/40/35/45` → `80/70/75/80` (was too permissive), added branch tests for `index.ts` context/session_before_compact + `tool-helpers` lint (overall 77% → 78% branches, 89.8% stmts)
+- Removed stale `overrides` (`esbuild`/`vite` vuln pins) — `npm audit` 0 vulns verified, reduces install friction
+- Bundle drift: README `120KB` → `132KB` (`npm run build && du -sh dist`)
+- TS lag: added `ts-next` CI job (`typescript@next` + `typecheck`, `continue-on-error`) to catch v7 breaks early; `typescript ^5` pinned
+- Dist committed: clarified `.gitignore` comment (`package.json files:[dist]` + `npm pack --dry-run`), fixed CI `npm ci || npm install` → `npm ci` (lockfile drifts now fail fast)
+- Nits: `eslint` `allowDefaultProject` scoped to `[src/*.test.ts, eslint.config.js, vitest.config.ts]`, `INTENT_VERBS as const` + `IntentVerb` type, `VAGUE_HYPOTHESIS_PATTERNS` word-boundary fix (`\bstuff\b|\bthing\b` via `VAGUE_WORD_RE` prevents `something` false-positive)
+
 ## [1.3.0] - 2026-09-25
 
 ### Added

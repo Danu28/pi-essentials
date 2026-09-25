@@ -1,7 +1,8 @@
 export declare const MAX_TASKS = 10;
 export declare const MAX_OUTPUT: number;
-export declare const INTENT_VERBS: string[];
-export declare const VAGUE_HYPOTHESIS_PATTERNS: string[];
+export declare const INTENT_VERBS: readonly ["add", "fix", "implement", "create", "update", "refactor", "remove", "delete", "migrate", "audit", "test", "build", "wire", "ship", "design", "expand", "enforce", "handle", "support", "render", "parse", "validate", "introduce", "improve", "optimize", "document"];
+export type IntentVerb = typeof INTENT_VERBS[number];
+export declare const VAGUE_HYPOTHESIS_PATTERNS: readonly string[];
 export declare const HEAVY_CHECK_PATTERNS: RegExp[];
 export declare function lintIntent(p: {
     goal: string;

@@ -7,6 +7,6 @@ coverage/
 .tmp/
 .pi/
 .vitest/
-# dist is intentionally committed for pi extension publishing (see package.json files)
-# uncomment to ignore build artifacts in forks:
+# dist is intentionally committed for pi extension publishing (see package.json "files": ["dist"])
+# Verified via `npm pack --dry-run`. Forks that build locally can uncomment:
 # dist/

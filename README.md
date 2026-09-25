@@ -25,7 +25,7 @@ Replaces `pi-brain` (7 tools) + `smart-pi` (4 tools) = 11 tools → **5 tools**.
 | 4 | **intel** | `refresh?: boolean`, `projectPath?: string` | Cached `lang/scripts/test/lint/build` profile. Auto-invalidates when `package.json` mtime > `scannedAt`. Call once per plan. |
 | 5 | **check** | `command: string (≥1)`, `cwd?: string`, `timeout?: 1-600s` (default 30) | `spawn {shell:true}`, 64KB trunc, `PASS/FAIL/TIMEOUT` + `budget: 42% (clear/moderate/getting-full/CRITICAL)` in one call. Prefer `read` over `bash` for file checks; always `timeout:10` for file stat, `30-60` for tests. See `docs/checks.md`. |
 
-**Coverage:** `88.61% stmts` (`state 99%`, `tools 89%`, `tool-helpers 76%`, `index 84%`) via `npm run test:coverage` (thresholds `45/40/35/45`).
+**Coverage:** `88.6% stmts` (`state 98%`, `tools 89%`, `tool-helpers 83%`, `index 84%`) via `npm run test:coverage` (thresholds `80/70/75/80`).
 
 ## Prompt templates
 
@@ -94,7 +94,7 @@ pi tools:list      # should show intent, plan, memo, intel, check
 
 ```bash
 npm run build && du -sh dist
-# dist: ~120KB (index 10KB + state 5KB + tools 25KB + helpers 6KB + maps)
+# dist: ~132KB (index 10KB + state 6KB + tools 24KB + helpers 7KB + maps)
 ```
 Run `npm run size` for a quick check.
 

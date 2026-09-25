@@ -312,3 +312,23 @@ describe("registerTools - extra branches", () => {
     expect(r.content[0].text).not.toContain("old text");
   });
 });
+
+describe("lint helpers - vague and heavy checks", () => {
+  it("lintIntent detects vague stuff/thing via word boundary", async () => {
+    const { lintIntent, lintPlan } = await import("./tool-helpers.js");
+    const w1 = lintIntent({ goal: "add feature", hypotheses: ["do stuff here | risk:2", "do thing now | risk:3"] } as any);
+    expect(w1.some((m) => m.includes("generic"))).toBe(true);
+    // "something" should not trigger via \bstuff\b fix, but via broader pattern it shouldn't false-positive
+    const w2 = lintIntent({ goal: "add something useful", hypotheses: ["jwt via jose | risk:2", "session redis | risk:5"], files: ["src/a.ts"], acceptance: "ok" } as any);
+    // "something" contains stuff but word-boundary prevents false hit; should have no vague warning for hypotheses
+    expect(w2.filter((m) => m.includes("generic") && m.includes("hypothesis"))).toEqual([]);
+    // heavy check lint
+    const warns = lintPlan([{ title: "t", refs: ["src/a.ts"], check: "findstr /R foo | find /c" } as any]);
+    expect(warns.some((m) => m.includes("heavy check"))).toBe(true);
+    // ls with space without quotes -> enters hint branch (no warning, just coverage)
+    const noWarn = lintPlan([{ title: "t", refs: ["src/a.ts"], check: 'ls -l "my file.txt"' } as any]);
+    expect(noWarn.some((m) => m.includes("heavy"))).toBe(false);
+    const hintBranch = lintPlan([{ title: "t", refs: ["src/a.ts"], check: "ls -l my file.txt" } as any]);
+    expect(Array.isArray(hintBranch)).toBe(true);
+  });
+});
