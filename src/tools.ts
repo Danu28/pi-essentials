@@ -13,7 +13,7 @@ import {
 } from "./state.js";
 import { readFile, stat } from "node:fs/promises";
 import { join, basename, resolve } from "node:path";
-import { parseRisk, validateDepends, parseTask, slugify, runCmd, MAX_TASKS } from "./tool-helpers.js";
+import { parseRisk, validateDepends, parseTask, slugify, runCmd, MAX_TASKS, lintIntent, lintPlan, truncationWarnings } from "./tool-helpers.js";
 
 export { validateDepends, parseTask, MAX_TASKS } from "./tool-helpers.js";
 
@@ -37,12 +37,15 @@ export function registerTools(pi: ExtensionAPI): void {
       let winner = p.hypotheses[0].split("|")[0].trim();
       if (risks[1] < risks[0]) winner = p.hypotheses[1].split("|")[0].trim();
       const links = [...memos.values()].filter((e) => scoreEpisode(e, p.goal) > 1).slice(0, 2).map((e) => e.id);
+      const truncatedGoal = truncate(p.goal, 200);
+      const truncatedHyps = p.hypotheses.map((h) => truncate(h, 300));
+      const truncatedConclusion = p.conclusion ? truncate(p.conclusion, 300) : `Winner: ${winner}`;
       const entry = {
         id,
-        goal: truncate(p.goal, 200),
-        hypotheses: p.hypotheses.map((h) => truncate(h, 300)),
+        goal: truncatedGoal,
+        hypotheses: truncatedHyps,
         winner,
-        conclusion: p.conclusion ? truncate(p.conclusion, 300) : `Winner: ${winner}`,
+        conclusion: truncatedConclusion,
         ts: Date.now(),
         links,
       };
@@ -52,9 +55,23 @@ export function registerTools(pi: ExtensionAPI): void {
       (globalThis as unknown as Record<string, unknown>).__pi_ess_focus = fl;
       try { await pi.appendEntry?.("pi-ess:focus", { goal: p.goal, files: p.files ?? [], acceptance: p.acceptance, ts: Date.now() }); } catch {}
       try { await pi.appendEntry?.("pi-ess:deliberation", entry); } catch {}
+      const lintWarns = lintIntent(p);
+      const truncWarns: string[] = [];
+      const gTrunc = truncationWarnings(p.goal, truncatedGoal);
+      if (gTrunc) truncWarns.push(`goal ${gTrunc}`);
+      p.hypotheses.forEach((h, i) => {
+        const w = truncationWarnings(h, truncatedHyps[i]);
+        if (w) truncWarns.push(`hypothesis ${i + 1} ${w}`);
+      });
+      if (p.conclusion) {
+        const w = truncationWarnings(p.conclusion, truncatedConclusion);
+        if (w) truncWarns.push(`conclusion ${w}`);
+      }
+      const warnBlock = lintWarns.length ? `\n\u26a0\ufe0f input lint:\n- ` + lintWarns.join("\n- ") : "";
+      const truncBlock = truncWarns.length ? `\n\u2702\ufe0f truncated:\n- ` + truncWarns.join("\n- ") : "";
       return {
-        content: [{ type: "text", text: `intent ${id}: ${p.goal}\nA: ${p.hypotheses[0]}\nB: ${p.hypotheses[1]}\n=> Winner: ${winner}` + (links.length ? ` links:[${links.join(",")}]` : "") + `\nFocus: ${fl}\n→ Next: plan{goal:"${p.goal}", tasks:["task 1 | refs:src/...","task 2 | refs:src/... check:${"npm test"}","task 3 | refs:src/... depends:0"]} (3-10 tasks) → intel → edits → check` }],
-        details: { deliberation: entry, focusLine: fl },
+        content: [{ type: "text", text: `intent ${id}: ${p.goal}\nA: ${p.hypotheses[0]}\nB: ${p.hypotheses[1]}\n=> Winner: ${winner}` + (links.length ? ` links:[${links.join(",")}]` : "") + `\nFocus: ${fl}` + warnBlock + truncBlock + `\n\u2192 Next: plan{goal:"${p.goal}", tasks:["task 1 | refs:src/...","task 2 | refs:src/... check:${"npm test"}","task 3 | refs:src/... depends:0"]} (3-10 tasks) \u2192 intel \u2192 edits \u2192 check` }],
+        details: { deliberation: entry, focusLine: fl, lintWarnings: lintWarns, truncationWarnings: truncWarns },
       };
     },
   });
@@ -114,13 +131,19 @@ export function registerTools(pi: ExtensionAPI): void {
             pl.tasks.push({ ...parsed, done: false });
           }
         }
+        const prevGoal = pl.goal;
         if (p.goal) pl.goal = truncate(p.goal, 200);
         try { await pi.appendEntry?.("pi-ess:plan", pl); } catch {}
         (globalThis as unknown as Record<string, unknown>).__pi_ess_plan = pl;
         const allDone = pl.tasks.every((t) => t.done);
+        const lintWarnsUpd = lintPlan(pl.tasks);
+        const truncWarnUpd = p.goal ? truncationWarnings(p.goal, pl.goal) : null;
+        // only surface lint if still incomplete to avoid noise on done
+        const warnBlockUpd = !allDone && lintWarnsUpd.length ? `\n\u26a0\ufe0f plan lint:\n- ` + lintWarnsUpd.join("\n- ") : "";
+        const truncBlockUpd = truncWarnUpd ? `\n\u2702\ufe0f truncated: goal ${truncWarnUpd} (was ${prevGoal.length}\u2192${pl.goal.length})` : "";
         return {
-          content: [{ type: "text", text: `${pl.goal}\n` + pl.tasks.map((t, i) => `${t.done ? "[x]" : "[ ]"} ${i + 1}. ${t.title}` + (t.check ? ` | check:${t.check}` : "") + (t.refs?.length ? ` | refs:${t.refs.join(",")}` : "") + (t.depends?.length ? ` | depends:${t.depends.join(",")}` : "")).join("\n") + `\n(id: ${pl.id})` + (allDone ? "\n→ All tasks done → memo remember + commit" : "\n→ Next: intel (once) → reads/edits → check → plan {id:\"" + pl.id + "\", done:[...]}") }],
-          details: { plan: pl },
+          content: [{ type: "text", text: `${pl.goal}\n` + pl.tasks.map((t, i) => `${t.done ? "[x]" : "[ ]"} ${i + 1}. ${t.title}` + (t.check ? ` | check:${t.check}` : "") + (t.refs?.length ? ` | refs:${t.refs.join(",")}` : "") + (t.depends?.length ? ` | depends:${t.depends.join(",")}` : "")).join("\n") + `\n(id: ${pl.id})` + warnBlockUpd + truncBlockUpd + (allDone ? "\n\u2192 All tasks done \u2192 memo remember + commit" : "\n\u2192 Next: intel (once) \u2192 reads/edits \u2192 check \u2192 plan {id:\"" + pl.id + "\", done:[...]}") }],
+          details: { plan: pl, lintWarnings: lintWarnsUpd, truncationWarning: truncWarnUpd },
         };
       }
       if (!p.goal || !p.tasks?.length) {
@@ -153,13 +176,18 @@ export function registerTools(pi: ExtensionAPI): void {
       }
       const tasks = deduped.map((parsed) => ({ ...parsed, done: false }));
       const id = `plan:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`;
-      const pl: Plan = { id, goal: truncate(p.goal, 200), tasks, ts: Date.now() };
+      const truncatedGoal = truncate(p.goal!, 200);
+      const pl: Plan = { id, goal: truncatedGoal, tasks, ts: Date.now() };
       plans.set(id, pl);
       (globalThis as unknown as Record<string, unknown>).__pi_ess_plan = pl;
       try { await pi.appendEntry?.("pi-ess:plan", pl); } catch {}
+      const lintWarns = lintPlan(tasks);
+      const truncWarn = truncationWarnings(p.goal!, truncatedGoal);
+      const warnBlock = lintWarns.length ? `\n\u26a0\ufe0f plan lint:\n- ` + lintWarns.join("\n- ") : "";
+      const truncBlock = truncWarn ? `\n\u2702\ufe0f truncated: goal ${truncWarn}` : "";
       return {
-        content: [{ type: "text", text: `${pl.goal}\n` + tasks.map((t, i) => `[ ] ${i + 1}. ${t.title}` + (t.check ? ` | check:${t.check}` : "") + (t.refs?.length ? ` | refs:${t.refs.join(",")}` : "")).join("\n") + `\n(id: ${id})\n→ Next: intel → reads/edits → check → plan {id:"${id}", done:[...]}` }],
-        details: { plan: pl },
+        content: [{ type: "text", text: `${pl.goal}\n` + tasks.map((t, i) => `[ ] ${i + 1}. ${t.title}` + (t.check ? ` | check:${t.check}` : "") + (t.refs?.length ? ` | refs:${t.refs.join(",")}` : "")).join("\n") + `\n(id: ${id})` + warnBlock + truncBlock + `\n\u2192 Next: intel \u2192 reads/edits \u2192 check \u2192 plan {id:"${id}", done:[...]}` }],
+        details: { plan: pl, lintWarnings: lintWarns, truncationWarning: truncWarn },
       };
     },
   });

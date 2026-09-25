@@ -91,7 +91,7 @@ export function scoreEpisode(
   for (const t of qt) {
     if (cue.includes(t)) s += 2;
     if (sum.includes(t)) s += 1;
-    if (det.includes(t)) s += 0.5;
+    if (det.includes(t)) s += 0.75; // boosted from 0.5 — detail matters
   }
   if (filterTags?.length) {
     const et = new Set((e.tags ?? []).map((t) => t.toLowerCase()));
@@ -99,6 +99,15 @@ export function scoreEpisode(
     if (matches === 0) return 0;
     if (s === 0) s = matches * 0.5;
     else s = s * (1 + 0.5 * (matches / filterTags.length));
+  }
+  // recency decay: recent memos get small boost, old memos naturally decay via LRU
+  if (s > 0) {
+    const ageDays = (Date.now() - e.ts) / (24 * 60 * 60 * 1000);
+    let recencyBoost = 0;
+    if (ageDays < 1) recencyBoost = 0.3;
+    else if (ageDays < 7) recencyBoost = 0.15;
+    else if (ageDays < 30) recencyBoost = 0.05;
+    if (recencyBoost) s = s * (1 + recencyBoost);
   }
   return s;
 }

@@ -2,6 +2,18 @@
 
 All notable changes to `pi-essentials` will be documented here. Follows [SemVer](https://semver.org/).
 
+## [1.3.0] - 2026-09-25
+
+### Added
+- Input quality lint: `intent` warns if goal <10ch, no verb, missing `acceptance`/`files`, vague hypotheses (`fix bug`/`maybe`), missing `risk:` — via `tool-helpers.ts:lintIntent`; `plan` warns if no `refs`/`check` overall or per-task — via `lintPlan`
+- Truncation surfacing: `intent` now shows `✂️ truncated: goal 250→200 chars` + per-hypothesis, `plan` shows goal truncation; `state.ts:truncate` unchanged but surfaced in tool response
+- `docs/prompt-templates.md` — 3 good/bad examples for `intent` (jwt `| risk:2` vs `maybe jwt`) and `plan` anti-patterns, plus memo recall recency tips
+- Memo recency decay: `scoreEpisode` boosted `detail` 0.5→0.75 and adds recency boost (<1d +30%, <7d +15%, <30d +5%) — addresses synonym gap via explicit `cue`/`tags` guidance
+
+### Changed
+- `README.md` tools table: `memo` detail weight 0.5→0.75 + recency note; added Prompt templates section linking to `docs/prompt-templates.md`
+- `tools.ts` intent/plan responses now include `⚠️ input lint` and `✂️ truncated` blocks + `details.lintWarnings`
+
 ## [1.2.0] - 2026-09-25
 
 ### Added

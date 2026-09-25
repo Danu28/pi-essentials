@@ -21,11 +21,17 @@ Replaces `pi-brain` (7 tools) + `smart-pi` (4 tools) = 11 tools → **5 tools**.
 |---|------|--------|---------|
 | 1 | **intent** | `goal: string (≥1)`, `hypotheses: [string, string]` (each `risk: N`), `files?: string[]`, `acceptance?: string`, `conclusion?: string` | Picks lower-risk winner, sets `[pi-essentials focus]` that survives `compact/fork` via `pi-ess:deliberation` + `pi-ess:focus`. Replaces `think` + `focus`. |
 | 2 | **plan** | `goal?: string`, `tasks?: string[]` (`title \| refs:src/a.ts check:bash: npm test depends:0,1`), `id?: string`, `done?: number[]` | Verifiable DAG 3-10 tasks. `refs` truncated 120ch, `depends` DAG validated, `check` per-task. The strict gate. |
-| 3 | **memo** | `action: "remember" \| "recall"`, `cue?: string`, `summary?: string`, `detail?: string`, `query?: string`, `tags?: string[]`, `refs?: string[]`, `limit?: 1-20` | Unified TF-IDF memory via `pi-ess:memo` (MAX 100 LRU). `remember` dedups by cue, `recall` scores `cue×2 + summary×1 + detail×0.5` + tag boost. |
+| 3 | **memo** | `action: "remember" \| "recall"`, `cue?: string`, `summary?: string`, `detail?: string`, `query?: string`, `tags?: string[]`, `refs?: string[]`, `limit?: 1-20` | Unified TF-IDF memory via `pi-ess:memo` (MAX 100 LRU). `remember` dedups by cue, `recall` scores `cue×2 + summary×1 + detail×0.75` + tag boost + recency. |
 | 4 | **intel** | `refresh?: boolean`, `projectPath?: string` | Cached `lang/scripts/test/lint/build` profile. Auto-invalidates when `package.json` mtime > `scannedAt`. Call once per plan. |
 | 5 | **check** | `command: string (≥1)`, `cwd?: string`, `timeout?: 1-600s` (default 120) | `spawn {shell:true}`, 64KB trunc, `PASS/FAIL/TIMEOUT` + `budget: 42% (clear/moderate/getting-full/CRITICAL)` in one call. |
 
 **Coverage:** `88.61% stmts` (`state 99%`, `tools 89%`, `tool-helpers 76%`, `index 84%`) via `npm run test:coverage` (thresholds `45/40/35/45`).
+
+## Prompt templates
+
+> **Better input beats better models.** See [`docs/prompt-templates.md`](./docs/prompt-templates.md) for 3 good/bad examples each for `intent` (good: `jwt via jose | risk:2` vs bad: `maybe jwt`) and `plan` anti-patterns, plus lint + truncation warnings.
+
+`intent` now lints: goal <10ch, no verb, missing `acceptance`/`files`, vague hypotheses, missing `risk:`, and surfaces `✂️ truncated: goal 250→200`. `plan` lints: plan has no `refs`/`check`, per-task missing `refs`/`check`.
 
 ## Flow (your happy/unhappy, now with 1 extension)
 
