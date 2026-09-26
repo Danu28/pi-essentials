@@ -78,6 +78,31 @@ export function lintIntent(p: { goal: string; hypotheses: [string, string]; file
   return warns;
 }
 
+export function hasUnquotedSpacePath(check: string): boolean {
+  // generic: true if any file path argument with spaces is not quoted — works for any folder name
+  // Strip quoted segments then inspect each command's arguments
+  const stripped = check.replace(/"[^"]*"/g, "__Q__").replace(/'[^']*'/g, "__Q__");
+  const segments = stripped.split(/\s*&&\s*|\s*\|\|\s*|\s*\|\s*|\s*;\s*/);
+  for (const seg of segments) {
+    const trimmed = seg.trim();
+    if (!trimmed) continue;
+    // remove leading command + flags (e.g. ls -lh, dir, findstr "pat", grep -q)
+    // keep only trailing args; we strip leading word(s) that are commands/flags
+    const withoutCmd = trimmed
+      .replace(/^\s*(ls|dir|cat|type|grep|findstr|head|tail|wc|echo)\b\s*/i, "")
+      .replace(/^\s*-[\w-]+\s*/g, "")
+      .replace(/^__Q__\s*/, "");
+    if (!withoutCmd || withoutCmd === "__Q__") continue;
+    // now withoutCmd should be file args; if it contains word space word slash => path with space
+    if (/\w+\s+\w+[\\/]/.test(withoutCmd)) return true;
+    if (/\w+\s+\w+\.\w+/.test(withoutCmd) && /[\\/]/.test(withoutCmd)) return true;
+    // bare multi-word file with space and extension without slash (e.g. My File.html) — warn if contains space before dot and no quote
+    // only if it looks like a path (no flags) and contains exactly a spaced filename
+    if (/^[\w\-\s]+\.\w+$/.test(withoutCmd.trim()) && /\s/.test(withoutCmd.trim())) return true;
+  }
+  return false;
+}
+
 export function osAwareCheckHint(check: string): string | null {
   if (isWindows() && WIN_ONLY_CMDS.some((re) => re.test(check))) {
     return `check "${check}" uses Unix cmd (ls/grep/cat) — on Windows cmd.exe use ${suggestedCheck(check.includes("grep") || check.includes("findstr") ? "search" : "exists")} or prefer read`;
@@ -99,9 +124,8 @@ export function lintPlan(tasks: Array<{ title: string; refs?: string[]; check?: 
     if (t.check) {
       const hint = osAwareCheckHint(t.check);
       if (hint) warns.push(hint);
-      // quote paths with spaces — only warn when literal "New folder" or "C:\..." appears unquoted
-      if (/New folder/.test(t.check) && !/"[^"]*New folder[^"]*"/.test(t.check)) {
-        warns.push(`task ${i + 1} "${t.title}" check has unquoted path with spaces — wrap in "quotes": ${suggestedCheck("exists")}`);
+      if (hasUnquotedSpacePath(t.check)) {
+        warns.push(`task ${i + 1} "${t.title}" check has unquoted path with spaces — wrap path in "quotes": ${suggestedCheck("exists")}`);
       }
     }
   });

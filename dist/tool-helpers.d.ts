@@ -17,6 +17,7 @@ export declare function lintIntent(p: {
     files?: string[];
     acceptance?: string;
 }): string[];
+export declare function hasUnquotedSpacePath(check: string): boolean;
 export declare function osAwareCheckHint(check: string): string | null;
 export declare function lintPlan(tasks: Array<{
     title: string;

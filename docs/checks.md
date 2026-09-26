@@ -18,7 +18,7 @@
 
 `intel` tells you the OS is Windows (`cmd.exe`) not `bash` on some hosts. The `check` tool spawns `{shell:true}` — so `ls`/`cat` fails on Windows.
 
-**Always quote paths with spaces:** `"New folder/login.html"` not `New folder/login.html`.
+**Always quote paths with spaces:** `"My Project/login.html"` not `My Project/login.html` (applies to any path with spaces).
 
 | Intent | Linux / git-bash | Windows `cmd.exe` | Recommended (cross-platform) |
 |--------|------------------|-------------------|------------------------------|
