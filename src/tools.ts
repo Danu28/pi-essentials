@@ -13,7 +13,7 @@ import {
 } from "./state.js";
 import { readFile, stat } from "node:fs/promises";
 import { join, basename, resolve } from "node:path";
-import { parseRisk, validateDepends, parseTask, slugify, runCmd, MAX_TASKS, lintIntent, lintPlan, truncationWarnings } from "./tool-helpers.js";
+import { parseRisk, validateDepends, parseTask, slugify, runCmd, MAX_TASKS, lintIntent, lintPlan, truncationWarnings, normalizeHypothesis, isWindows, getOSLabel, normalizeCheckForOS, osAwareCheckHint } from "./tool-helpers.js";
 
 export { validateDepends, parseTask, MAX_TASKS } from "./tool-helpers.js";
 
@@ -21,24 +21,25 @@ export function registerTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "intent",
     label: "intent",
-    description: "Deliberate + set working memory in ONE call. Goal + 2 hypotheses + files + acceptance. Picks winner, sets focus that survives compaction. REQUIRED before any write/edit/bash.",
+    description: "Deliberate + set working memory in ONE call. Goal + 2 hypotheses + files + acceptance. Picks winner, sets focus that survives compaction. REQUIRED before any write/edit/bash. hypotheses: [\"A mechanism | risk:2\", \"B mechanism | risk:5\"] — risk lower = safer. Also accepts [{value:\"...\"}].",
     promptSnippet: "intent — deliberate + focus (required before write/edit/bash)",
-    promptGuidelines: ["ALWAYS call intent with 2 hypotheses before plan/write", "Sets focus that survives compaction and links relevant memos"],
+    promptGuidelines: ["ALWAYS call intent with 2 hypotheses before plan/write — each as \"mechanism | risk:N\" (e.g. jwt via jose | risk:2)", "Sets focus that survives compaction and links relevant memos"],
     parameters: Type.Object({
       goal: Type.String({ minLength: 1 }),
-      hypotheses: Type.Array(Type.String({ minLength: 1 }), { minItems: 2, maxItems: 2 }),
+      hypotheses: Type.Array(Type.Union([Type.String({ minLength: 1 }), Type.Object({ value: Type.String({ minLength: 1 }) }), Type.Object({ text: Type.String({ minLength: 1 }) }), Type.Object({ hypothesis: Type.String({ minLength: 1 }) }), Type.Object({ title: Type.String({ minLength: 1 }) })]), { minItems: 2, maxItems: 2 }),
       files: Type.Optional(Type.Array(Type.String())),
       acceptance: Type.Optional(Type.String()),
       conclusion: Type.Optional(Type.String()),
     }),
-    async execute(_id: string, p: { goal: string; hypotheses: [string, string]; files?: string[]; acceptance?: string; conclusion?: string }) {
+    async execute(_id: string, p: { goal: string; hypotheses: [unknown, unknown]; files?: string[]; acceptance?: string; conclusion?: string }) {
+      const hyps = (p.hypotheses as unknown[]).map(normalizeHypothesis) as [string, string];
       const id = `think:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`;
-      const risks = p.hypotheses.map(parseRisk);
-      let winner = p.hypotheses[0].split("|")[0].trim();
-      if (risks[1] < risks[0]) winner = p.hypotheses[1].split("|")[0].trim();
+      const risks = hyps.map(parseRisk);
+      let winner = hyps[0].split("|")[0].trim();
+      if (risks[1] < risks[0]) winner = hyps[1].split("|")[0].trim();
       const links = [...memos.values()].filter((e) => scoreEpisode(e, p.goal) > 1).slice(0, 2).map((e) => e.id);
       const truncatedGoal = truncate(p.goal, 200);
-      const truncatedHyps = p.hypotheses.map((h) => truncate(h, 300));
+      const truncatedHyps = hyps.map((h) => truncate(h, 300));
       const truncatedConclusion = p.conclusion ? truncate(p.conclusion, 300) : `Winner: ${winner}`;
       const entry = {
         id,
@@ -55,11 +56,11 @@ export function registerTools(pi: ExtensionAPI): void {
       (globalThis as unknown as Record<string, unknown>).__pi_ess_focus = fl;
       try { await pi.appendEntry?.("pi-ess:focus", { goal: p.goal, files: p.files ?? [], acceptance: p.acceptance, ts: Date.now() }); } catch {}
       try { await pi.appendEntry?.("pi-ess:deliberation", entry); } catch {}
-      const lintWarns = lintIntent(p);
+      const lintWarns = lintIntent({ goal: p.goal, hypotheses: hyps as [string, string], files: p.files, acceptance: p.acceptance });
       const truncWarns: string[] = [];
       const gTrunc = truncationWarnings(p.goal, truncatedGoal);
       if (gTrunc) truncWarns.push(`goal ${gTrunc}`);
-      p.hypotheses.forEach((h, i) => {
+      hyps.forEach((h, i) => {
         const w = truncationWarnings(h, truncatedHyps[i]);
         if (w) truncWarns.push(`hypothesis ${i + 1} ${w}`);
       });
@@ -70,7 +71,7 @@ export function registerTools(pi: ExtensionAPI): void {
       const warnBlock = lintWarns.length ? `\n\u26a0\ufe0f input lint:\n- ` + lintWarns.join("\n- ") : "";
       const truncBlock = truncWarns.length ? `\n\u2702\ufe0f truncated:\n- ` + truncWarns.join("\n- ") : "";
       return {
-        content: [{ type: "text", text: `intent ${id}: ${p.goal}\nA: ${p.hypotheses[0]}\nB: ${p.hypotheses[1]}\n=> Winner: ${winner}` + (links.length ? ` links:[${links.join(",")}]` : "") + `\nFocus: ${fl}` + warnBlock + truncBlock + `\n\u2192 Next: plan{goal:"${p.goal}", tasks:["task 1 | refs:src/...","task 2 | refs:src/... check:${"npm test"}","task 3 | refs:src/... depends:0"]} (3-10 tasks) \u2192 intel \u2192 edits \u2192 check` }],
+        content: [{ type: "text", text: `intent ${id}: ${p.goal}\nA: ${hyps[0]}\nB: ${hyps[1]}\n=> Winner: ${winner}` + (links.length ? ` links:[${links.join(",")}]` : "") + `\nFocus: ${fl}` + warnBlock + truncBlock + `\n\u2192 Next: plan{goal:"${p.goal}", tasks:["task 1 | refs:src/...","task 2 | refs:src/... check:${"npm test"}","task 3 | refs:src/... depends:0"]} (3-10 tasks) \u2192 intel \u2192 edits \u2192 check` }],
         details: { deliberation: entry, focusLine: fl, lintWarnings: lintWarns, truncationWarnings: truncWarns },
       };
     },
@@ -205,9 +206,9 @@ export function registerTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "memo",
     label: "memo",
-    description: "Unified durable memory. action=remember to encode or action=recall to retrieve. One tool instead of two.",
+    description: "Unified durable memory. action=remember to encode or action=recall to retrieve. One tool instead of two. remember needs cue + summary.",
     promptSnippet: "memo — remember/recall durable memory",
-    promptGuidelines: ["Use memo recall before intent to load relevant context", "Use memo remember after plan done"],
+    promptGuidelines: ["Use memo recall before intent to load relevant context", "Use memo remember after plan done — e.g. memo{action:\"remember\", cue:\"auth-jwt\", summary:\"jwt via jose 15m\"}"],
     parameters: Type.Object({
       action: Type.Union([Type.Literal("remember"), Type.Literal("recall")]),
       cue: Type.Optional(Type.String()),
@@ -221,7 +222,10 @@ export function registerTools(pi: ExtensionAPI): void {
     async execute(_id: string, p: { action: string; cue?: string; summary?: string; detail?: string; query?: string; tags?: string[]; refs?: string[]; limit?: number }) {
       if (p.action === "remember") {
         if (!p.cue?.trim() || !p.summary?.trim()) {
-          return { content: [{ type: "text", text: "memo remember: need cue + summary" }], details: { error: "missing" } };
+          const missing: string[] = [];
+          if (!p.cue?.trim()) missing.push("cue");
+          if (!p.summary?.trim()) missing.push("summary");
+          return { content: [{ type: "text", text: `memo remember: missing ${missing.join(" + ")} — need cue + summary. Example: memo{action:"remember", cue:"auth-jwt", summary:"jwt via jose 15m expiry", tags:["auth"], refs:["src/auth.ts"]}` }], details: { error: "missing", missing } };
         }
         const norm = p.cue.trim().toLowerCase();
         const exists = [...memos.values()].find((e) => e.cue.toLowerCase() === norm);
@@ -269,9 +273,9 @@ export function registerTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "intel",
     label: "intel",
-    description: "Project profile cached: lang, scripts, test/lint/build. Call ONCE at task start — later calls free (cache).",
-    promptSnippet: "intel — cached project profile (call once)",
-    promptGuidelines: ["Call intel once after plan to get test/lint/build cmds, then proceed to edits"],
+    description: "Project profile cached: lang, scripts, test/lint/build, OS + shell. Call ONCE at task start — later calls free (cache). Returns OS-aware suggested check.",
+    promptSnippet: "intel — cached project profile (call once) — returns OS + suggested check",
+    promptGuidelines: ["Call intel once after plan to get test/lint/build cmds + OS-aware check template, then proceed to edits"],
     parameters: Type.Object({
       refresh: Type.Optional(Type.Boolean()),
       projectPath: Type.Optional(Type.String()),
@@ -303,6 +307,9 @@ export function registerTools(pi: ExtensionAPI): void {
       let lintCmd: string | undefined;
       let buildCmd: string | undefined;
       let name: string | undefined;
+      const os = getOSLabel();
+      const shell = isWindows() ? "cmd.exe" : "bash";
+      const suggested = isWindows() ? 'dir "file.html" or type "file.html" or findstr "pat" "file.html" — or prefer read' : 'ls -lh "file.html" or grep -q "pat" "file.html" — or prefer read';
       if (present.has("package.json")) {
         try {
           const raw = await readFile(join(cwd, "package.json"), "utf8");
@@ -333,11 +340,14 @@ export function registerTools(pi: ExtensionAPI): void {
         testCmd: testCmd ?? "not detected",
         lintCmd: lintCmd ?? "not detected",
         buildCmd: buildCmd ?? "not detected",
+        os,
+        shell,
+        suggestedCheck: suggested,
         scannedAt: Date.now(),
         text: "",
       };
       const displayName = name ?? basename(cwd);
-      const text = `project: ${displayName} (${lang})\n` + `test: ${profile.testCmd} | lint: ${profile.lintCmd} | build: ${profile.buildCmd}\n` + `scripts: ${Object.entries(scripts).slice(0, 6).map(([k, v]) => `${k}->${v}`).join(" | ") || "none"}`;
+      const text = `project: ${displayName} (${lang}) | os: ${os} shell:${shell}\n` + `test: ${profile.testCmd} | lint: ${profile.lintCmd} | build: ${profile.buildCmd}\n` + `scripts: ${Object.entries(scripts).slice(0, 6).map(([k, v]) => `${k}->${v}`).join(" | ") || "none"}\n` + `suggested check: ${suggested} — prefer read for file checks; check timeout:10 (file) / 30-60 (test)`;
       const entry: IntelProfile = { ...profile, text };
       (globalThis as unknown as Record<string, unknown>).__pi_ess_intel = entry;
       try { await pi.appendEntry?.("pi-ess:intel", entry); } catch {}
@@ -348,17 +358,20 @@ export function registerTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "check",
     label: "check",
-    description: "Run a check and get PASS/FAIL + budget in same call. Use testCmd from intel. Never claim success without PASS.",
-    promptSnippet: "check — verify PASS/FAIL + budget",
-    promptGuidelines: ["ALWAYS run check after edits; never mark plan done without PASS", "On FAIL fix and re-check; after 2 fails need debug intent"],
+    description: "Run a check and get PASS/FAIL + budget in same call. Use testCmd from intel. OS-aware: auto-translates ls/grep/cat ↔ dir/findstr/type on Windows. Never claim success without PASS.",
+    promptSnippet: "check — verify PASS/FAIL + budget (OS-aware)",
+    promptGuidelines: ["ALWAYS run check after edits; never mark plan done without PASS — use timeout:10 for file, 30-60 for tests", "On FAIL fix and re-check; after 2 fails need debug intent"],
     parameters: Type.Object({
       command: Type.String({ minLength: 1 }),
       cwd: Type.Optional(Type.String()),
       timeout: Type.Optional(Type.Number({ minimum: 1, maximum: 600 })),
     }),
     async execute(_id: string, p: { command: string; cwd?: string; timeout?: number }, _sig: unknown, _upd: unknown, ctx: { cwd: string; getContextUsage?: () => { percent?: number | null; tokens?: number; contextWindow?: number } | null }) {
-      const cmd = p.command.trim();
+      let cmd = p.command.trim();
       if (!cmd) return { content: [{ type: "text", text: "check: command required" }], details: { error: "empty" } };
+      const hint = osAwareCheckHint(cmd);
+      const normalized = normalizeCheckForOS(cmd);
+      if (normalized !== cmd) cmd = normalized;
       const cwd = p.cwd ?? ctx.cwd;
       const toMs = Math.min(p.timeout ?? 30, 600) * 1000;
       const start = Date.now();
@@ -382,7 +395,8 @@ export function registerTools(pi: ExtensionAPI): void {
       const verdict = res.timedOut ? "TIMEOUT" : res.ok ? "PASS" : "FAIL";
       const body = res.timedOut ? `TIMEOUT after ${elapsed}s` : res.ok ? truncate((res.stdout || res.stderr).trim() || "(no output)", 500) : truncate((res.stderr || res.stdout).split("\n").slice(-40).join("\n"), 1200);
       const budgetLine = pct !== null ? `budget: ${pct}% (${tier})${tier === "CRITICAL" ? " -> compact next" : ""}` : "budget: unknown";
-      const text = `check: ${verdict} (exit ${res.code}) in ${elapsed}s -- ${cmd}\n` + body + `\n${budgetLine}` + (res.ok ? "\n→ Next: plan {id,done:[...]} → memo remember" : "\n→ Next: fix error above → re-run check (hint: intel test cmd, after 2 fails → intent{goal:'debug ...'})" );
+      const hintLine = hint ? `\n\u26a0\ufe0f os hint: ${hint} (auto-translated)` : "";
+      const text = `check: ${verdict} (exit ${res.code}) in ${elapsed}s -- ${cmd}\n` + body + `\n${budgetLine}` + hintLine + (res.ok ? "\n→ Next: plan {id,done:[...]} → memo remember" : "\n→ Next: fix error above → re-run check (hint: intel test cmd, after 2 fails → intent{goal:'debug ...'})" );
       return { content: [{ type: "text", text }], details: { ok: res.ok, code: res.code, timedOut: res.timedOut, budget: { pct, tier } } };
     },
   });

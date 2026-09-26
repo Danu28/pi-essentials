@@ -6,6 +6,58 @@ export const INTENT_VERBS = ["add", "fix", "implement", "create", "update", "ref
 export const VAGUE_HYPOTHESIS_PATTERNS = ["fix bug", "maybe", "do thing", "quick fix", "improve stuff", "handle thing", "some bug", "general"];
 const VAGUE_WORD_RE = /\bstuff\b|\bthing\b/i;
 export const HEAVY_CHECK_PATTERNS = [/findstr\s+\/R/i, /find\s+\/c/i, /\|\s*find\b/i, /ls\s+-R/i, /find\s+\./i];
+export const WIN_ONLY_CMDS = [/\b(ls|grep|cat|head|tail)\b/];
+export const UNIX_ONLY_CMDS = [/\b(dir|findstr|type)\b/i];
+export function isWindows() {
+    return process.platform === "win32";
+}
+export function getOSLabel() {
+    return isWindows() ? "win32 (cmd.exe)" : process.platform;
+}
+export function normalizeCheckForOS(cmd) {
+    if (!isWindows())
+        return cmd;
+    let out = cmd;
+    // common unix -> windows translations when running under cmd.exe
+    // only translate simple patterns to stay safe
+    out = out.replace(/\bls\s+-lh\b/g, "dir");
+    out = out.replace(/\bls\s+-1\b/g, "dir /b");
+    out = out.replace(/\bls\b/g, "dir");
+    out = out.replace(/\bcat\b/g, "type");
+    out = out.replace(/\bgrep\s+-q\b/g, "findstr");
+    out = out.replace(/\bgrep\b/g, "findstr");
+    return out;
+}
+export function suggestedCheck(kind = "exists") {
+    if (isWindows()) {
+        if (kind === "search")
+            return 'findstr "<pattern>" "file.html"';
+        if (kind === "head")
+            return 'type "file.html"';
+        return 'dir "file.html"';
+    }
+    if (kind === "search")
+        return 'grep -q "<pattern>" "file.html"';
+    if (kind === "head")
+        return 'head -n 20 "file.html"';
+    return 'ls -lh "file.html"';
+}
+export function normalizeHypothesis(h) {
+    if (typeof h === "string")
+        return h;
+    if (h && typeof h === "object") {
+        const o = h;
+        if (typeof o.value === "string" && o.value.trim())
+            return o.value;
+        if (typeof o.text === "string" && o.text.trim())
+            return o.text;
+        if (typeof o.hypothesis === "string" && o.hypothesis.trim())
+            return o.hypothesis;
+        if (typeof o.title === "string" && o.title.trim())
+            return o.title;
+    }
+    return String(h ?? "");
+}
 export function lintIntent(p) {
     const warns = [];
     const goal = p.goal ?? "";
@@ -19,7 +71,8 @@ export function lintIntent(p) {
     if (!p.files?.length)
         warns.push("missing files — list 1-3 refs: files:['src/auth.ts'] helps focus survive compaction");
     for (let i = 0; i < 2; i++) {
-        const raw = p.hypotheses[i] ?? "";
+        const rawIn = p.hypotheses[i] ?? "";
+        const raw = normalizeHypothesis(rawIn);
         const title = raw.split("|")[0].trim();
         if (title.length < 10)
             warns.push(`hypothesis ${i + 1} vague (<10 chars title): "${title}" — e.g. "jwt via jose, 15m expiry | risk:2"`);
@@ -27,9 +80,18 @@ export function lintIntent(p) {
         if (VAGUE_HYPOTHESIS_PATTERNS.some((pat) => lower.includes(pat)) || VAGUE_WORD_RE.test(title))
             warns.push(`hypothesis ${i + 1} generic ("${title}") — include mechanism + risk: e.g. "session store redis | risk:5"`);
         if (!/risk\s*:/i.test(raw))
-            warns.push(`hypothesis ${i + 1} missing risk — add " | risk:2" (lower = safer)`);
+            warns.push(`hypothesis ${i + 1} missing risk — add " | risk:2" (lower = safer) — defaults to risk:5 if omitted`);
     }
     return warns;
+}
+export function osAwareCheckHint(check) {
+    if (isWindows() && WIN_ONLY_CMDS.some((re) => re.test(check))) {
+        return `check "${check}" uses Unix cmd (ls/grep/cat) — on Windows cmd.exe use ${suggestedCheck(check.includes("grep") || check.includes("findstr") ? "search" : "exists")} or prefer read`;
+    }
+    if (!isWindows() && UNIX_ONLY_CMDS.some((re) => re.test(check))) {
+        return `check "${check}" uses Windows cmd (dir/findstr) — on Unix use ${suggestedCheck("exists")}`;
+    }
+    return null;
 }
 export function lintPlan(tasks) {
     const warns = [];
@@ -44,8 +106,14 @@ export function lintPlan(tasks) {
             warns.push(`task ${i + 1} "${t.title}" missing check — add | check:npm test (or per-task lint)`);
         if (t.check && HEAVY_CHECK_PATTERNS.some((re) => re.test(t.check)))
             warns.push(`task ${i + 1} "${t.title}" heavy check "${t.check}" — prefer lightweight dir/ls or read; avoid findstr /R, find /c, ls -R (2m hangs). Use lightweight check + timeout:10`);
-        if (t.check && /\b(ls|cat|grep)\b/.test(t.check) && /"[^"]*\s[^"]*"/.test(t.check) === false && t.check.includes(" ")) {
-            // hint about quoting paths with spaces, non-blocking
+        if (t.check) {
+            const hint = osAwareCheckHint(t.check);
+            if (hint)
+                warns.push(hint);
+            // quote paths with spaces — only warn when literal "New folder" or "C:\..." appears unquoted
+            if (/New folder/.test(t.check) && !/"[^"]*New folder[^"]*"/.test(t.check)) {
+                warns.push(`task ${i + 1} "${t.title}" check has unquoted path with spaces — wrap in "quotes": ${suggestedCheck("exists")}`);
+            }
         }
     });
     return warns;

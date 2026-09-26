@@ -4,12 +4,20 @@ export declare const INTENT_VERBS: readonly ["add", "fix", "implement", "create"
 export type IntentVerb = typeof INTENT_VERBS[number];
 export declare const VAGUE_HYPOTHESIS_PATTERNS: readonly string[];
 export declare const HEAVY_CHECK_PATTERNS: RegExp[];
+export declare const WIN_ONLY_CMDS: RegExp[];
+export declare const UNIX_ONLY_CMDS: RegExp[];
+export declare function isWindows(): boolean;
+export declare function getOSLabel(): string;
+export declare function normalizeCheckForOS(cmd: string): string;
+export declare function suggestedCheck(kind?: "exists" | "search" | "head"): string;
+export declare function normalizeHypothesis(h: unknown): string;
 export declare function lintIntent(p: {
     goal: string;
     hypotheses: [string, string];
     files?: string[];
     acceptance?: string;
 }): string[];
+export declare function osAwareCheckHint(check: string): string | null;
 export declare function lintPlan(tasks: Array<{
     title: string;
     refs?: string[];

@@ -37,6 +37,9 @@ export interface IntelProfile {
     testCmd: string;
     lintCmd: string;
     buildCmd: string;
+    os?: string;
+    shell?: string;
+    suggestedCheck?: string;
     scannedAt: number;
     text: string;
 }
