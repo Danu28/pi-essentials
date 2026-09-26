@@ -332,3 +332,99 @@ describe("lint helpers - vague and heavy checks", () => {
     expect(Array.isArray(hintBranch)).toBe(true);
   });
 });
+
+describe("tool-helpers branch coverage", () => {
+  it("hasUnquotedSpacePath edge cases", async () => {
+    const { hasUnquotedSpacePath } = await import("./tool-helpers.js");
+    // empty and quoted-only -> false, hits continue branches
+    expect(hasUnquotedSpacePath("")).toBe(false);
+    expect(hasUnquotedSpacePath('"My Folder/file.txt"')).toBe(false);
+    expect(hasUnquotedSpacePath("'My Folder/file.txt'")).toBe(false);
+    // quoted spaced path should not warn
+    expect(hasUnquotedSpacePath('dir "My Folder/file.txt"')).toBe(false);
+    // unquoted spaced path with slash -> true
+    expect(hasUnquotedSpacePath('dir My Folder/file.txt')).toBe(true);
+    expect(hasUnquotedSpacePath('ls My Folder/sub/file.txt')).toBe(true);
+    // bare filename with space and extension without slash
+    expect(hasUnquotedSpacePath('cat My File.html')).toBe(true);
+    expect(hasUnquotedSpacePath('cat "My File.html"')).toBe(false);
+    // multiple segments with && separator
+    expect(hasUnquotedSpacePath('dir "Good/File.txt" && dir Bad Folder/file.txt')).toBe(true);
+    expect(hasUnquotedSpacePath('dir "Good/File.txt" && dir "Good Folder/file.txt"')).toBe(false);
+    // flags only -> false
+    expect(hasUnquotedSpacePath('ls -lh')).toBe(false);
+    // pipe separator
+    expect(hasUnquotedSpacePath('cat file.txt | grep foo')).toBe(false);
+    // word space word dot ext with slash
+    expect(hasUnquotedSpacePath('type My Folder\file.txt')).toBe(true);
+    // covers __Q__ withoutCmd branch
+    expect(hasUnquotedSpacePath('echo "hello world"')).toBe(false);
+  });
+
+  it("osAwareCheckHint branches", async () => {
+    const { osAwareCheckHint, isWindows, suggestedCheck } = await import("./tool-helpers.js");
+    // on win32, Unix cmds trigger hint; others do not
+    if (isWindows()) {
+      expect(osAwareCheckHint('ls -lh "f.txt"')).toContain("Unix cmd");
+      expect(osAwareCheckHint('dir "f.txt"')).toBeNull();
+      expect(osAwareCheckHint('grep foo "f.txt"')).toContain("Unix cmd");
+      expect(osAwareCheckHint('findstr foo "f.txt"')).toBeNull();
+    } else {
+      expect(osAwareCheckHint('dir "f.txt"')).toContain("Windows cmd");
+    }
+    // suggestedCheck all kinds
+    expect(suggestedCheck("exists")).toBeTruthy();
+    expect(suggestedCheck("search")).toBeTruthy();
+    expect(suggestedCheck("head")).toBeTruthy();
+  });
+
+  it("normalizeCheckForOS and helpers", async () => {
+    const { normalizeCheckForOS, suggestedCheck, parseRisk, validateDepends, slugify, truncationWarnings } = await import("./tool-helpers.js");
+    const { truncate } = await import("./state.js");
+    // normalize translations on this platform
+    const norm = normalizeCheckForOS('ls -lh "f.txt"');
+    expect(typeof norm).toBe("string");
+    expect(normalizeCheckForOS('cat "f.txt"')).toBeTruthy();
+    expect(suggestedCheck()).toBeTruthy();
+    expect(truncate("abc", 2)).toBe("ab…");
+    expect(truncate("abc", 10)).toBe("abc");
+    expect(parseRisk("no risk")).toBe(5);
+    expect(parseRisk("risk:2")).toBe(2);
+    expect(parseRisk("risk: abc")).toBe(5);
+    expect(validateDepends(undefined, 3)).toBeNull();
+    expect(validateDepends([0], 1)).toBeNull();
+    expect(truncationWarnings("short", "short")).toBeNull();
+    expect(truncationWarnings("x".repeat(10), "x".repeat(5)+"…")).toContain("→");
+    expect(slugify("Hello World!")).toBe("hello-world");
+    expect(slugify("   ")).toBe("memo");
+    const { normalizeHypothesis } = await import("./tool-helpers.js");
+    expect(normalizeHypothesis({ value: " hello " })).toBe(" hello ");
+    expect(normalizeHypothesis({ text: "hi" })).toBe("hi");
+    expect(normalizeHypothesis({ hypothesis: "h1" })).toBe("h1");
+    expect(normalizeHypothesis({ title: "t1" })).toBe("t1");
+    expect(normalizeHypothesis(null)).toBe("");
+  });
+
+  it("lintPlan unquoted space path warning", async () => {
+    const { lintPlan } = await import("./tool-helpers.js");
+    const warns = lintPlan([{ title: "t", refs: ["src/a.ts"], check: 'dir My Folder/file.txt' } as any]);
+    expect(warns.some((w) => w.includes("unquoted path"))).toBe(true);
+    const ok = lintPlan([{ title: "t", refs: ["src/a.ts"], check: 'dir "My Folder/file.txt"' } as any]);
+    expect(ok.some((w) => w.includes("unquoted path"))).toBe(false);
+  });
+
+  it("runCmd truncation and timeout branches", async () => {
+    const { runCmd } = await import("./tool-helpers.js");
+    // stdout truncation via large loop writes
+    const big = await runCmd('node -e "for(let i=0;i<70;i++) process.stdout.write(\'a\'.repeat(2000))"', undefined, 3000);
+    expect(big.stdout).toContain("truncated");
+    expect(big.stdout.length).toBeGreaterThan(60000);
+    // stderr truncation
+    const bigErr = await runCmd('node -e "for(let i=0;i<70;i++) process.stderr.write(\'b\'.repeat(2000))"', undefined, 3000);
+    expect(bigErr.stderr).toContain("truncated");
+    // timeout kills
+    const to = await runCmd('node -e "setTimeout(()=>{}, 5000)"', undefined, 200);
+    expect(to.timedOut).toBe(true);
+    expect(to.ok).toBe(false);
+  }, 15000);
+});

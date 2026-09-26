@@ -20,6 +20,9 @@ jobs:
       - run: npm test
       - run: npm run test:coverage
       - run: npm run size --if-present
+      - name: size gate (dist <160KB)
+        run: node -e "const fs=require('fs');let t=0;for(const f of fs.readdirSync('dist')){try{t+=fs.statSync('dist/'+f).size}catch{}};const kb=Math.round(t/1024);console.log('dist size '+kb+'KB');if(kb>160){console.error('SIZE GATE FAIL: dist '+kb+'KB >160KB');process.exit(1)}"
+        shell: bash
   ts-next:
     runs-on: ubuntu-latest
     continue-on-error: true

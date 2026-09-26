@@ -211,4 +211,60 @@ describe("pi-essentials extension", () => {
     await h({ systemPromptOptions: opts });
     expect(opts.promptGuidelines.filter((g: string) => g.includes("pi-essentials")).length).toBe(1);
   });
+
+  it("tool_result check isError and write isError branches", async () => {
+    const { pi, handlers } = makePi();
+    createExtension(pi);
+    await handlers["session_start"]({}, { entries: [], store: {} });
+    await handlers["tool_result"]({ toolName: "intent", isError: false, result: { details: { deliberation: { goal: "g" } } } }, {});
+    await handlers["tool_result"]({ toolName: "plan", isError: false, result: { details: {} } }, {});
+    // check isError true -> fails++ and first warning (fails 1)
+    const r1: any = await handlers["tool_result"]({ toolName: "check", isError: true, content: [{ type: "text", text: "err" }], result: { details: {} } }, {});
+    expect(JSON.stringify(r1?.content ?? "")).toContain("1 error");
+    // second isError -> needsDebug without warning
+    const r2: any = await handlers["tool_result"]({ toolName: "check", isError: true, content: [], result: { details: {} } }, {});
+    expect(r2).toBeUndefined();
+    // reset via PASS
+    await handlers["tool_result"]({ toolName: "check", isError: false, result: { details: { ok: true } } }, {});
+    // write isError true -> fails 1 warning branch
+    const w1: any = await handlers["tool_result"]({ toolName: "write", isError: true, content: [], result: { details: {} } }, {});
+    expect(JSON.stringify(w1?.content ?? "")).toContain("1 consecutive write");
+    // second write isError -> needsDebug
+    await handlers["tool_result"]({ toolName: "write", isError: true, content: [] }, {});
+    const blocked = await handlers["tool_call"]({ toolName: "write" });
+    expect(blocked?.block).toBe(true);
+    // write success resets fails
+    await handlers["tool_result"]({ toolName: "intent", isError: false, result: { details: { deliberation: { goal: "debug fix" } } } }, {});
+    const wOk = await handlers["tool_result"]({ toolName: "write", isError: false }, {});
+    expect(wOk).toBeUndefined();
+    const ok = await handlers["tool_call"]({ toolName: "write" });
+    expect(ok).toBeUndefined();
+    // edit and bash isError branches too
+    await handlers["tool_result"]({ toolName: "edit", isError: true, content: [] }, {});
+    await handlers["tool_result"]({ toolName: "edit", isError: false }, {});
+    await handlers["tool_result"]({ toolName: "bash", isError: true, content: [] }, {});
+    await handlers["tool_result"]({ toolName: "bash", isError: false }, {});
+  });
+
+  it("context null/undef budget branches", async () => {
+    const { pi, handlers } = makePi();
+    createExtension(pi);
+    const h = handlers["context"];
+    // null percent, null tokens
+    const ctxNull: any = { getContextUsage: () => ({ percent: null, tokens: null, contextWindow: null }) };
+    const r1 = await h({ messages: [{ role: "user", content: "hi" }] }, ctxNull);
+    expect(r1).toBeUndefined();
+    // undefined usage
+    const ctxUndef: any = { getContextUsage: () => null };
+    const r2 = await h({ messages: [{ role: "user", content: "hi" }] }, ctxUndef);
+    expect(r2).toBeUndefined();
+    // NaN percent
+    const ctxNaN: any = { getContextUsage: () => ({ percent: NaN }) };
+    const r3 = await h({ messages: [{ role: "user", content: "hi" }] }, ctxNaN);
+    expect(r3).toBeUndefined();
+    // Infinity
+    const ctxInf: any = { getContextUsage: () => ({ percent: Infinity }) };
+    const r4 = await h({ messages: [{ role: "user", content: "hi" }] }, ctxInf);
+    expect(r4).toBeUndefined();
+  });
 });
