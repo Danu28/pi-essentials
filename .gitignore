@@ -7,6 +7,9 @@ coverage/
 .tmp/
 .pi/
 .vitest/
+# Windows null device artifact (e.g. `> nul` in bash creates file `nul`; correct is `> /dev/null` or `> NUL` in cmd.exe)
+nul
+NUL
 # dist is intentionally committed for pi extension publishing (see package.json "files": ["dist"])
 # Verified via `npm pack --dry-run`. Forks that build locally can uncomment:
 # dist/

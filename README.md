@@ -94,7 +94,7 @@ pi tools:list      # should show intent, plan, memo, intel, check
 
 ```bash
 npm run build && du -sh dist
-# dist: ~132KB (index 10KB + state 6KB + tools 24KB + helpers 7KB + maps)
+# dist: ~144KB (index 10KB + state 6KB + tools 24KB + helpers 7KB + maps)
 ```
 Run `npm run size` for a quick check.
 
