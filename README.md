@@ -25,7 +25,7 @@ Replaces `pi-brain` (7 tools) + `smart-pi` (4 tools) = 11 tools → **5 tools**.
 | 4 | **intel** | `refresh?: boolean`, `projectPath?: string` | Cached `lang/scripts/test/lint/build` profile. Auto-invalidates when `package.json` mtime > `scannedAt`. Call once per plan. |
 | 5 | **check** | `command: string (≥1)`, `cwd?: string`, `timeout?: 1-600s` (default 30) | `spawn {shell:true}`, 64KB trunc, `PASS/FAIL/TIMEOUT` + `budget: 42% (clear/moderate/getting-full/CRITICAL)` in one call. Prefer `read` over `bash` for file checks; always `timeout:10` for file stat, `30-60` for tests. See `docs/checks.md`. |
 
-**Coverage:** `88.6% stmts` (`state 98%`, `tools 89%`, `tool-helpers 83%`, `index 84%`) via `npm run test:coverage` (thresholds `80/70/75/80`).
+**Coverage:** `93.4% stmts` (`state 98%`, `tools 88%`, `tool-helpers 93%`, `index 99%`, branches `82%`) via `npm run test:coverage` (thresholds `80/70/70/80`).
 
 ## Prompt templates
 

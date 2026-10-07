@@ -195,6 +195,21 @@ describe("scoreEpisode edge cases", () => {
     // s>0 and tag matches -> boost
     expect(s).toBeGreaterThan(2);
   });
+  it("recency 8-30d branch (<30) and empty detail", () => {
+    const fifteenDaysAgo = Date.now() - 15 * 24 * 60 * 60 * 1000;
+    const e: any = { cue: "auth", summary: "auth summary", detail: "", tags: [], ts: fifteenDaysAgo };
+    const s = scoreEpisode(e, "auth");
+    // base 3 (cue 2 + summary 1) * 1.05 recency (<30d) ~3.15
+    expect(s).toBeGreaterThan(3);
+    expect(s).toBeLessThan(4);
+  });
+  it("recency >30d no boost, negative scoreExpiry", () => {
+    const fortyDaysAgo = Date.now() - 40 * 24 * 60 * 60 * 1000;
+    const e: any = { cue: "auth", summary: "auth", tags: [], ts: fortyDaysAgo };
+    const s = scoreEpisode(e, "auth");
+    // 3 base, no recency
+    expect(s).toBe(3);
+  });
 });
 
 describe("hydrate extra branches", () => {

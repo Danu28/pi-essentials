@@ -428,3 +428,82 @@ describe("tool-helpers branch coverage", () => {
     expect(to.ok).toBe(false);
   }, 15000);
 });
+
+describe("audit fixes - branch coverage", () => {
+  beforeEach(() => clearState());
+  it("intel stale cache falls through to fresh (mtime > scannedAt)", async () => {
+    const { pi, tools } = makeMockPi();
+    registerTools(pi);
+    const intel = tools.get("intel");
+    const r1 = await intel.execute("id", {}, null, null, { cwd: process.cwd() });
+    expect(r1.details.source).toBe("fresh");
+    // fake stale: set scannedAt ancient so mtime > scannedAt triggers fresh path
+    (globalThis as any).__pi_ess_intel.scannedAt = 1;
+    const r2 = await intel.execute("id", {}, null, null, { cwd: process.cwd() });
+    expect(r2.details.source).toBe("fresh");
+    expect(r2.content[0].text).toContain("project:");
+  });
+  it("intel stat throw returns cached (catch branch line 295-296)", async () => {
+    const { pi, tools } = makeMockPi();
+    registerTools(pi);
+    const intel = tools.get("intel");
+    // prime cache for cwd
+    await intel.execute("id", {}, null, null, { cwd: process.cwd() });
+    const cached = (globalThis as any).__pi_ess_intel;
+    // now request with projectPath that has cached.cwd mismatch? Use same cwd but mock stat throw by giving non-existent cwd where package.json missing but cached matches only if we craft cached for that cwd
+    // Simpler: set cached for a fake cwd and request that fake cwd where stat throws
+    const fakeCwd = "/tmp/pi-ess-test-missing-" + Date.now();
+    (globalThis as any).__pi_ess_intel = { ...cached, cwd: fakeCwd, scannedAt: Date.now() };
+    const r = await intel.execute("id", { projectPath: fakeCwd }, null, null, { cwd: fakeCwd });
+    // should return cached via catch (source cache) without scanning
+    expect(r.details.source).toBe("cache");
+    clearState();
+  });
+  it("intel alternate langs via temp dirs (Cargo/go/py branches)", async () => {
+    const { pi, tools } = makeMockPi();
+    registerTools(pi);
+    const intel = tools.get("intel");
+    const fs = await import("node:fs/promises");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const tmpBase = await fs.mkdtemp(path.join(os.tmpdir(), "pi-ess-"));
+    try {
+      const cargo = path.join(tmpBase, "Cargo.toml");
+      await fs.writeFile(cargo, "[package]\nname=\"tmp\"\n");
+      const rCargo = await intel.execute("id", { projectPath: tmpBase, refresh: true }, null, null, { cwd: tmpBase });
+      expect(rCargo.content[0].text).toContain("rust");
+      await fs.unlink(cargo);
+      await fs.writeFile(path.join(tmpBase, "go.mod"), "module tmp\n");
+      const rGo = await intel.execute("id", { projectPath: tmpBase, refresh: true }, null, null, { cwd: tmpBase });
+      expect(rGo.content[0].text).toContain("go");
+      await fs.unlink(path.join(tmpBase, "go.mod"));
+      await fs.writeFile(path.join(tmpBase, "pyproject.toml"), "[project]\nname=\"tmp\"\n");
+      const rPy = await intel.execute("id", { projectPath: tmpBase, refresh: true }, null, null, { cwd: tmpBase });
+      expect(rPy.content[0].text).toContain("python");
+    } finally {
+      await fs.rm(tmpBase, { recursive: true, force: true });
+    }
+  });
+  it("check budget getting-full tier (70-90%)", async () => {
+    const { pi, tools } = makeMockPi();
+    registerTools(pi);
+    const check = tools.get("check");
+    const r = await check.execute("id", { command: "node -e \"process.exit(0)\"" }, null, null, { cwd: process.cwd(), getContextUsage: () => ({ percent: 80 }) });
+    expect(r.content[0].text).toContain("getting-full");
+  });
+  it("check budget unknown when tokens missing", async () => {
+    const { pi, tools } = makeMockPi();
+    registerTools(pi);
+    const check = tools.get("check");
+    const r = await check.execute("id", { command: "node -e \"process.exit(0)\"" }, null, null, { cwd: process.cwd(), getContextUsage: () => ({}) as any });
+    expect(r.content[0].text).toContain("budget: unknown");
+  });
+  it("check handles context throws", async () => {
+    const { pi, tools } = makeMockPi();
+    registerTools(pi);
+    const check = tools.get("check");
+    const fakeUsage = (() => { throw new Error("boom"); }) as any;
+    const r = await check.execute("id", { command: "node -e \"process.exit(0)\"" }, null, null, { cwd: process.cwd(), getContextUsage: fakeUsage });
+    expect(r.content[0].text).toContain("budget: unknown");
+  });
+});

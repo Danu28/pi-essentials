@@ -267,4 +267,31 @@ describe("pi-essentials extension", () => {
     const r4 = await h({ messages: [{ role: "user", content: "hi" }] }, ctxInf);
     expect(r4).toBeUndefined();
   });
+
+  it("essentials command done branches and budget edge", async () => {
+    const { pi, handlers, commands } = makePi();
+    createExtension(pi);
+    await handlers["session_start"]({}, { entries: [], store: {} });
+    await handlers["tool_result"]({ toolName: "intent", isError: false, result: { details: { deliberation: { goal: "g" } } } }, {});
+    await handlers["tool_result"]({ toolName: "plan", isError: false, result: { details: {} } }, {});
+    const notify = vi.fn();
+    const ctx: any = { getContextUsage: () => ({ percent: 42 }), ui: { notify } };
+    await commands["essentials"].handler("", ctx);
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("intent: done"), "info");
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("plan: done"), "info");
+    // needsDebug branch in essentials -> fails with debug flag
+    await handlers["tool_result"]({ toolName: "check", isError: false, result: { details: { ok: false } } }, {});
+    await handlers["tool_result"]({ toolName: "check", isError: false, result: { details: { ok: false } } }, {});
+    const notify2 = vi.fn();
+    await commands["essentials"].handler("", { getContextUsage: () => ({ percent: 95 }), ui: { notify: notify2 } });
+    expect(notify2).toHaveBeenCalledWith(expect.stringContaining("need debug intent"), "info");
+    // getContextUsage throws branch
+    const notify3 = vi.fn();
+    await commands["essentials"].handler("", { getContextUsage: () => { throw new Error("boom"); }, ui: { notify: notify3 } });
+    expect(notify3).toHaveBeenCalledWith(expect.stringContaining("budget: n/a"), "info");
+    // unknown percent branch
+    const notify4 = vi.fn();
+    await commands["essentials"].handler("", { getContextUsage: () => ({ percent: null }), ui: { notify: notify4 } });
+    expect(notify4).toHaveBeenCalledWith(expect.stringContaining("budget: unknown"), "info");
+  });
 });

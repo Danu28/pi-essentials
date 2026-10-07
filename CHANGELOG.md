@@ -2,6 +2,12 @@
 
 All notable changes to `pi-essentials` will be documented here. Follows [SemVer](https://semver.org/).
 
+## [1.3.2] - 2026-10-07
+
+### Fixed
+- Audit fixes (2): README coverage `88.6%` → `93.4%` (actual `95.1%` stmts `84.9%` branches) + thresholds `80/70/75/80` → `80/70/70/80` to match `vitest.config.ts`; `npm audit` `source-map-js@1.2.1` → `1.2.2` via `overrides` (1 high remaining `brace-expansion@5.0.9` is transitive via `pi-coding-agent@0.87.1 → minimatch@10.2.6`, requires upstream bump — tracked)
+- Branch coverage `82.3%` → `84.9%` (`tools.ts` `72.8%` → `78.5%`, `state.ts` `92.1%` → `93.0%`): added tests for `intel` stale-cache / alt langs (`Cargo.toml`/`go.mod`/`pyproject.toml`) / `stat` throw cache branch, `check` `getting-full` tier + context throw, `scoreEpisode` recency `15d/40d`, `essentials` done/needsDebug + budget `n/a/unknown` (85 → 94 tests)
+
 ## [1.3.1] - 2026-09-25
 
 ### Fixed
